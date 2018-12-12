@@ -1,5 +1,3 @@
-##### draw - drawBackground - onDraw - dispatchDraw  - onDrawForeground
-
 ##### animation
 
 ##### touchEvent - mulTouchEvent 
