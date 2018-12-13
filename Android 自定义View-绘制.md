@@ -96,6 +96,46 @@ Canvas 绘制颜色和一些基本图形，Android 已经提供了相应的 api�
 
 ###### Canvas 绘制文字
 
+- Canvas 绘制文字的方式
+
+  - Canvas.drawText(String text, float x, float y, Paint paint)
+  - Canvas.drawTextOnPath(String text, Path path, float hOffset, float vOffset, Paint paint)
+  - StaticLayout.draw(Canvas canvas)
+
+- Paint 增加文字绘制效果
+
+  - Paint.setTextSize(float textSize)
+  - Paint.setStrikeThruText(boolean strikeThruText) 开启删除线
+  - Paint.setUnderlineText(boolean underlineText) 开启下划线
+  - Paint.setTextSkewX(float skewX) 设置文字横向错切角度
+  - Paint.setTextScaleX(float scaleX) 设置文字横向放缩
+  - Paint.setLetterSpacing(float letterSpacing) 设置字符间距
+  - Paint.setTextAlign(Paint.Align align) 设置文字的对齐方式
+
+- 文字尺寸测量方法
+
+  文字在排印方面有 5 条线来表示文字位置，他们从上到下分别是：top、ascent、baseline、descent、bottom。
+
+  - float Paint.getFontSpacing()
+
+    获取推荐的两行文字的行距，实际上就是 baseline 间的距离。
+
+  - FontMetrics Paint.getFontMetrics()
+
+    获取 Paint 的 FontMetrics。FontMetrics提供了 top、ascent、descent、bottom 数值。
+
+  - Paint.getTextBound(String text, int start, int end, Rect bounds)
+
+    获取文字的显示范围，start/end 分别表示文字的起始位置和结束位置，最后结果会写入 bounds 。
+
+  - float Paint.measureText(String text)
+
+    测量文字的宽度并返回，对于同一串字符，此方法比 getTextBound 的返回值大一点。
+
+  - int breakText(String text, boolean measureForwards, float maxWidth, float[] measuredWidth)
+
+    这个方法也是用来测量文字宽度的，但和 measureText() 的区别是，breakText() 是在给出宽度上限的前提下测量文字的宽度，如果文字的宽度超过了上限，就会在临近限制的位置截断文字。最终截取的文字宽度会赋值给 measuredWidth，方法返回值是截取的文字个数。
+
 ##### Paint 基本使用
 
 在 Canvas 绘制时，总需要一个 Paint 类型的入参。它实际上控制了 Canvas 在绘制时的各种样式效果。Paint 的功能可以分为
@@ -149,4 +189,55 @@ Canvas 绘制颜色和一些基本图形，Android 已经提供了相应的 api�
   - ComposePathEffect：组合效果，对线条按顺序使用效果，只绘制一条效果
 - Paint.setShadowLayer：在绘制内容下面加一层阴影
 
-##### Canvas 的范围裁切和几何变换
+##### Canvas 范围裁切
+
+Canvas 的范围裁切有两个方法：clipRect() 和 clipPath() 。
+
+在裁切的前后需要注意使用 Canvas.save() 和 Canvas.restore() 来保存和恢复绘制的内容。
+
+##### Canvas 几何变换
+
+参与 Canvas 的几何变换除了 Canvas，还有 Matrix、Camera 两个类，在了解具体的变前，先了解下二维环境和三维环境下不同的坐标系。
+
+![1544713345780](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\1544713345780.png)
+
+二维坐标系下，顺时针旋转为正，逆时针旋转为负。
+
+三维坐标系下，通常是绕着某个轴进行旋转。我们从某个轴的正方向望去，绕这个轴顺时针旋转为正，逆时针旋转为负。
+
+###### 使用 Canvas 来做常见的二维变换
+
+- Canvas.translate(float dx, float dy) 横向和纵向的位移。
+- Canvas.rotate(float degrees, float px, float py) 旋转
+- Canvas.scale(float sx, float sy, float px, float py) 横向和纵向的放缩倍数
+- Canvas.skew(float sx, float sy) x 方向和 y 方向的错切系数
+
+###### 使用 Matrix 来做常见和不常见的二维变换
+
+使用 Matrix 做常见变换的流程是：
+
+1. 创建 Matrix 对象
+2. 调用 Matrix 的 pre/postTranslate pre/postRotate pre/postScale pre/postSkew 设置几何变换
+3. 使用 Canvas.setMatrix(matrix) 或 Canvas.concat(matrix) 来把几何变换应用到 Canvas
+
+使用 Matrix 做自定义变换需要使用 setPolyToPoly() 方法，Matrix.setPolyToPoly(float[] src, int srcIndex, float[] dst, int dstIndex, int pointCount) 用点对点映射的方式设置变换
+
+###### 使用 Camera 来做三维变换
+
+Camera 做三维变换主要有旋转和移动相机。
+
+- Camera 旋转
+
+  Camera.rotateX()/Camera.rotateY()/Camera.rotateZ() 是相应的旋转方法，需要注意的是调用前后需要使用Canvas.save() 和 Canvas.restore() 来保存和恢复绘制的内容。
+
+- 移动相机 Camera.setLocation(x, y, z)
+
+  参数的单位不是像素，而是 inch英寸。Android 中 inch 和像素的换算单位写死是 72。在 Camera 中，相机的默认位置是 (0, 0, -8)（英寸）。8 x 72 = 576，所以它的默认位置是 (0, 0, -576)（像素）。如果绘制的内容过大，当它翻转起来的时候，就有可能出现图像投影过大的「糊脸」效果。而且由于换算单位被写死成了 72 像素，而不是和设备 dpi 相关的，所以在像素越大的手机上，这种「糊脸」效果会越明显。
+
+  而使用 setLocation 方法来把相机往后移动，就可以修复这种问题。
+
+  ```java
+  DisplayMetrics displayMetrics = getResources().getDisplayMetrics();
+  float newZ = -displayMetrics.density * 6;
+  mCamera.setLocation(0, 0, newZ);
+  ```
