@@ -1,9 +1,3 @@
-##### animation
-
-##### touchEvent - mulTouchEvent 
-
-##### scroller - Gesture - viewDrawHelper
-
 自定义 View 的全部过程包括 布局过程、绘制过程、动画、触摸反馈几大流程，其中布局过程涉及到 measure() 和 layout() 两个调度方法，对于不同的需求效果，粗略可以分为三种形式：
 
 1. 修改已有 View 的尺寸，只需要重写 onMeasure() 来修改。
