@@ -171,3 +171,11 @@ synchronized 方法是 synchronized 代码块一种简写方式，其中用户�
 相当于通用版的 volatile。
 
 - Lock/ReentrantReadWriteLock
+
+中断线程的方法可以通过 Thread.interrupt()来设置。
+
+Thread.join Thread.yield
+
+生产消费者
+
+Android 一直循环为什么不崩溃

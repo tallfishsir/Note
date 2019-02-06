@@ -1,78 +1,62 @@
-ArrayList 通过不同构造函数创建后，初始状态什么样的
+##### Q1：List 接口下有哪些常见方法？
 
-ArrayList 添加和删除元素源码分析
+「添加」：add(int index, E e) add(E e) set(int index, E e) 
 
-ArrayList 的扩容机制，包括怎么扩容，扩容最大值
+「删除」：remove(int index) remove(E e) clear()
 
-System.arraycopy 和 Arrays.copyOf 两个方法分析
+「获取」：isEmpty() size() get(int index) contains(Object o) indexOf(Object o) lastIndexOf(Object o)
 
-ArrayList 的成员常量
+  其他：sort(Comparator c) subList(int startIndex, int endIndex) toArray()
 
-```java
-/**
- * Default initial capacity.
- */
-private static final int DEFAULT_CAPACITY = 10;
-
-/**
- * Shared empty array instance used for empty instances.
- * 
- */
-private static final Object[] EMPTY_ELEMENTDATA = {};
-
-/**
- * Shared empty array instance used for default sized empty instances. We
- * distinguish this from EMPTY_ELEMENTDATA to know how much to inflate when
- * first element is added.
- */
-private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
-
-/**
- * The maximum size of array to allocate.
- * Some VMs reserve some header words in an array.
- * Attempts to allocate larger arrays may result in
- * OutOfMemoryError: Requested array size exceeds VM limit
- */
-private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
-```
-
-ArrayList 的成员变量
+##### Q2：ArrayList 的常见成员变量及含义？
 
 ```java
 /**
- * The array buffer into which the elements of the ArrayList are stored.
- * The capacity of the ArrayList is the length of this array buffer. Any
- * empty ArrayList with elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA
- * will be expanded to DEFAULT_CAPACITY when the first element is added.
+ * 实际上存放元素的容器，capacity 就是这个数组的长度。
+ * 当构造函数中没有指定数组大小时，此数组会指向一个空数组，
+ * 此后添加一个元素时，capacity 会增加到 DEFAULT_CAPACITY
  */
 transient Object[] elementData; // non-private to simplify nested class access
 
 /**
- * The size of the ArrayList (the number of elements it contains).
- *
- * @serial
+ * elementData 中实际存放的元素个数
  */
 private int size;
+
+/**
+ * ArrayList 容量的默认值
+ */
+private static final int DEFAULT_CAPACITY = 10;
+
+/**
+ * 空数组，在没有添加元素之前，一般都是一个
+ */
+private static final Object[] EMPTY_ELEMENTDATA = {};
+
+/**
+ * 一个共享的空数组对象，用于构造函数时没有指定大小。
+ */
+private static final Object[] DEFAULTCAPACITY_EMPTY_ELEMENTDATA = {};
+
+/**
+ * elementData 中存放元素的上限
+ */
+private static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8;
 ```
 
-ArrayList 存放数据实际上就是存放在数组 elementData 中，size 是数组中存放数据的数量。
-
-##### ArrayList 的构造函数
+ArrayList 的构造函数
 
 ```java
 /**
- * Constructs an empty list with an initial capacity of ten.
+ * elementData 指向空数组
  */
 public ArrayList() {
     this.elementData = DEFAULTCAPACITY_EMPTY_ELEMENTDATA;
 }
 
 /**
- * Constructs an empty list with the specified initial capacity.
- *
- * @param  initialCapacity  the initial capacity of the list
- * @throws IllegalArgumentException if the specified initial capacity
- *         is negative
+ * 当指定的容量大小是 0，处理方式和空参构造函数保持一致
+ * 大于 0 时，elementData 指向一个指定大小的数组
  */
 public ArrayList(int initialCapacity) {
     if (initialCapacity > 0) {
@@ -85,111 +69,66 @@ public ArrayList(int initialCapacity) {
 }
 ```
 
-ArrayList 的空参构造函数会给 elementData 赋值一个空数组，此时 size 仍然是 0 ，直到调用 add() 方法时才会创建一个初始容量是 10的数组给 elementData。
+ArrayList 的空参构造函数会给 elementData 赋值一个空数组，此时 size 仍然是 0 ，直到调用 add() 方法时 elementData 才会创建一个长度是10的数组。
 
 ArrayList 指定初始容量的构造函数会对入参进行一次检查，小于 0 会抛出异常，等于 0  会指向一个空数组，只有大于 0 ，才会赋值一个指定大小的数组。
 
-##### ArrayList 的添加元素流程
+##### Q3：ArrayList 添加/删除元素源码分析？
 
-ArrayList 添加元素有两个重载方法：add(E e)  和 add(int index, E element) ，后者相较于前者，多了检查入参 index 的方法rangeCheckForAdd() 和数组复制的操作 System.arraycopy()。
+ArrayList 添加元素有两个重载方法：add(E e)  和 add(int index, E element) 。
 
 首先，熟悉一下 add() 方法的主要流程：
 
 ```java
 /**
- * Appends the specified element to the end of this list.
- *
- * @param e element to be appended to this list
- * @return <tt>true</tt> (as specified by {@link Collection#add})
+ * 「尾插法」添加新的元素
  */
 public boolean add(E e) {
-    ensureCapacityInternal(size + 1);  // 确认添加元素后内部数组容量是否正常
+    ensureCapacityInternal(size + 1);
     elementData[size++] = e;
     return true;
 }
 
 /**
- * Inserts the specified element at the specified position in this
- * list. Shifts the element currently at that position (if any) and
- * any subsequent elements to the right (adds one to their indices).
- *
- * @param index index at which the specified element is to be inserted
- * @param element element to be inserted
- * @throws IndexOutOfBoundsException {@inheritDoc}
- */
-public void add(int index, E element) {
-    rangeCheckForAdd(index);
-    ensureCapacityInternal(size + 1);  // Increments modCount!!
-    System.arraycopy(elementData, index, elementData, index + 1, size - index);
-    elementData[index] = element;
-    size++;
-}
-
-/**
- * A version of rangeCheck used by add and addAll.
- */
-private void rangeCheckForAdd(int index) {
-    if (index > size || index < 0)
-        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
-}
-
-/**
- * 判断 elementData 数组的容量是否能支持当前容量+1
+ * 用于确认数组的大小，如果数组长度不满足所需要的容量，就会扩容
+ * 如果 elementData 是一个空数组，取默认值和参数值的较大值，
+ * 传入 ensureExplicitCapacity 确认最后的数组大小
  */
 private void ensureCapacityInternal(int minCapacity) {
-    ensureExplicitCapacity(calculateCapacity(elementData, minCapacity));
-}
-
-/**
- * 计算 elementData 的需要的最小容量
- */
-private static int calculateCapacity(Object[] elementData, int minCapacity) {
     if (elementData == DEFAULTCAPACITY_EMPTY_ELEMENTDATA) {
-        return Math.max(DEFAULT_CAPACITY, minCapacity);
+        minCapacity = Math.max(DEFAULT_CAPACITY, minCapacity);
     }
-    return minCapacity;
+    ensureExplicitCapacity(minCapacity);
 }
 
 /**
- * 确认是否需要扩展数组
+ * 确认是否需要扩容
  */
 private void ensureExplicitCapacity(int minCapacity) {
     modCount++;
-    // overflow-conscious code
+    // 如果需要的最小需求容量大于当前 elementData 的长度，就需要扩展数组长度到最小需求容量
     if (minCapacity - elementData.length > 0)
         grow(minCapacity);
 }
-```
 
-先在这里整理一下流程，当调用 add() 方法时，会先判断当前 elementData 数组的容量是否能够支持。
-
-注意：当我们通过上文提到的两个构造函数创建 ArrayList 对象时，size 的值一直是 0，所以在 calculateCapacity() 方法时会有两种情况，对于空构造函数创建的 ArrayList 对象，会返回 Math.max(DEFAULT_CAPACITY, minCapacity) 也就是 10，而指定了容量大小的则会返回 size +1 也就是1。
-
-然后就来到 ensureExplicitCapacity() 确认是否要扩展数组了。指定了容量大小的 ArrayList 对象，需求容量是1，而实际空数组的长度比1 大。暂时就不会扩容。而空构造函数创建的 ArrayList 对象。需求容量是10，而实际空数组的长度是0，此时就需要通过 grow() 方法对 elementData 数组进行扩容。
-
-```java
 /**
- * Increases the capacity to ensure that it can hold at least the
- * number of elements specified by the minimum capacity argument.
- *
- * @param minCapacity the desired minimum capacity
+ * 扩容 elementData 的大小
+ * 首先，对旧容量扩大至1.5倍，如果扩容1.5倍后还是无法满足最小需求容量，新容量就被赋值为最小需求容量
+ * 如果扩容或者赋值最小需求容量 新容量比 MAX_ARRAY_SIZE 还大，就根据最小需求容量来确认最终 elementData 长度
  */
 private void grow(int minCapacity) {
-    // oldCapacity = 0 ,minCapacity = 10
     int oldCapacity = elementData.length;
-    // newCapacity = 0 ,minCapacity = 10
     int newCapacity = oldCapacity + (oldCapacity >> 1);
     if (newCapacity - minCapacity < 0)
-        // newCapacity = 10 ,minCapacity = 10
         newCapacity = minCapacity;
     if (newCapacity - MAX_ARRAY_SIZE > 0)
         newCapacity = hugeCapacity(minCapacity);
-    // minCapacity is usually close to size, so this is a win:
     elementData = Arrays.copyOf(elementData, newCapacity);
 }
 
 /**
- * 对于 newCapacity 超过了 Java 要求的最大数组长度，就对比下 minCapacity
+ * 在 扩容或者赋值最小需求容量后的新容量比 MAX_ARRAY_SIZE 还大的前提下
+ * elementData 的长度根据最小需求容量来确定是 Integer.MAX_VALUE 还是 MAX_ARRAY_SIZE
  */
 private static int hugeCapacity(int minCapacity) {
     if (minCapacity < 0) // overflow
@@ -199,155 +138,198 @@ private static int hugeCapacity(int minCapacity) {
 }
 ```
 
-上面注释的内容是前面空构造函数创建的 ArrayList 对象。需求容量是10，而实际空数组的长度是 0 的场景。
+先在这里整理一下流程，当调用 add(E e) 方法时，会先判断当前 elementData 数组的容量是否能够支持。如果无法支持，就会进行扩容：首先对旧容量扩大1.5倍，如果还是无法满足需求，就直接扩容至最小需求容量。无论是扩容还是直接赋值最小需求容量后的大小如果大于了 MAX_ARRAY_SIZE ，根据最小需求容量是否大于 MAX_ARRAY_SIZE 决定是 Integer.MAX_VALUE 还是 MAX_ARRAY_SIZE；如果扩容还是直接赋值最小需求容量后的大小如果小于 MAX_ARRAY_SIZE ，那就是最终的数组大小。
 
-整体整理下来 grow() 方法就是把 elementData 数组的长度增加到 1.5 倍，再和需求容量(minCapacity)比较，如果仍然小，newCapacity 就取 minCapacity 的值。然后再拿 newCapacity 的大小和 Java 要求的数组最大容量对比，如果超出了，就根据需求容量(minCapacity)取 Integer.MAX_VALUE 还是 MAX_ARRAY_SIZE。然后通过 Arrays.copyOf() 扩展 elementData 数组。
-
-到了这里，elementData 数组的长度问题就已经解决了，最后就是把元素真正的添加到数组中，对于 add(E e) ，把元素放到 size+1的位置就可以，但对于 add(int index, E element) ，我们需要把 index 及以后的元素往后移动一位，这时候需要调用 System.arraycopy()。
-
-那么  Arrays.copyOf () 和 System.arraycopy() 两个方法有什么区别和联系呢？
+add(int index, E element)相较于add(E e) ，增加了入参检查和数组赋值操作System.arraycopy()。
 
 ```java
 /**
- *  Arrays.copyOf
+ * 在某个位置插入元素，需要把 index 及以后的元素往后移动一位
  */
+public void add(int index, E element) {
+    if (index > size || index < 0)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+    ensureCapacityInternal(size + 1);  // Increments modCount!!
+    System.arraycopy(elementData, index, elementData, index + 1, size - index);
+    elementData[index] = element;
+    size++;
+}
+```
+
+ArrayList 删除元素有很多重载函数，了解下 remove(int index) 其他的都是大同小异。
+
+```java
+public E remove(int index) {
+    if (index >= size)
+        throw new IndexOutOfBoundsException(outOfBoundsMsg(index));
+    modCount++;
+    E oldValue = (E) elementData[index];
+    int numMoved = size - index - 1;
+    if (numMoved > 0)
+        System.arraycopy(elementData, index+1, elementData, index, numMoved);
+    elementData[--size] = null; // clear to let GC do its work
+    return oldValue;
+}
+```
+
+remove() 的实现，底层还是通过数组移动复制，来覆盖 index 位置上的元素。有一点要注意点是在复制移动后，还手动的将结尾多出来的元素设置为 null，从而让 GC 顺利完成内存清理。
+
+##### Q4：System.arrayCopy 和 Arrays.copyOf 两个方法的区别和联系？
+
+```java
+public static native void arrayCopy(Object src, int srcPos, Object dest, int destPos, int length);
+```
+
+System.arrayCopy() 是一个系统的原生方法，它的参数中需要一个目标数组，然后将原数组拷贝到目标数组中。可以选择拷贝的起点和长度。
+
+```java
 public static <T> T[] copyOf(T[] original, int newLength) {
     return (T[]) copyOf(original, newLength, original.getClass());
 }
 
 public static <T,U> T[] copyOf(U[] original, int newLength, Class<? extends T[]> newType) {
-    @SuppressWarnings("unchecked")
     T[] copy = ((Object)newType == (Object)Object[].class)
         ? (T[]) new Object[newLength]
         : (T[]) Array.newInstance(newType.getComponentType(), newLength);
     System.arraycopy(original, 0, copy, 0, Math.min(original.length, newLength));
     return copy;
 }
+```
 
+Arrays.copyOf() 内部调用了System.arraycopy()  是方法内部新建一个数组，并返回该数组。
+
+##### Q5：ArrayList 为什么在遍历中直接删除会报异常？
+
+在遍历中删除 ArrayList 中某个元素，都需要先获取 Iterator 对象，然后再调用 Iterator.remove 来删除，而不能在遍历中调用 List.remove 方法来删除元素。
+
+```java
 /**
- *   System.arraycopy() 是一个原生方法
+ * List 接口获取迭代器
  */
-public static native void arraycopy(Object src,  int  srcPos, Object dest, int destPos, int length);
-```
-
-System.arraycopy() 需要目标数组，将原数组拷贝到你自己定义的数组里，而且可以选择拷贝的起点和长度以及放入新数组中的位置；Arrays.copyOf() 内部调用了System.arraycopy()  是方法内部新建一个数组，并返回该数组。
-
-##### ArrayList 的删除元素流程
-
-ArrayList 删除元素有很多重载函数，了解下 remove(int index) 其他的都是大同小异。
-
-```java
- /**
-  * Removes the element at the specified position in this list.
-  * Shifts any subsequent elements to the left (subtracts one from their
-  * indices).
-  *
-  * @param index the index of the element to be removed
-  * @return the element that was removed from the list
-  * @throws IndexOutOfBoundsException {@inheritDoc}
-  */
- public E remove(int index) {
-     rangeCheck(index);
-     modCount++;
-     E oldValue = elementData(index);
-     int numMoved = size - index - 1;
-     if (numMoved > 0)
-         System.arraycopy(elementData, index+1, elementData, index,numMoved);
-     elementData[--size] = null; 
-     return oldValue;
- }
-```
-
-remove() 的实现，底层还是通过数组移动复制，来覆盖 index 位置上的元素。有一点要注意点是在复制移动后，还手动的将结尾多出来的元素设置为 null，从而让 GC 顺利完成内存清理。
-
-ArrayList 是如何通过 iterator() 来完成删除操作的
-
-```java
 public Iterator<E> iterator() {
     return new Itr();
 }
 
-/**
- * An optimized version of AbstractList.Itr
- */
 private class Itr implements Iterator<E> {
-    int cursor;       // 指向下一个遍历的元素
-    int lastRet = -1; // 指向最新返回的元素
+    // ArrayList 中的元素个数
+    protected int limit = ArrayList.this.size;
+    // 下一个要返回的 index
+    int cursor; 
+    // 上一个返回元素的 index
+    int lastRet = -1;
+    // 期望的修改次数
     int expectedModCount = modCount;
-    
-    Itr() {}
-    
+    /**
+	 * 如果下一个返回元素的 index 小于总的元素个数，说明还有下一个
+	 */
     public boolean hasNext() {
-        return cursor != size;
+        return cursor < limit;
     }
-
+    /**
+	 * 获取下一个元素
+	 */
     public E next() {
-        // 如果在 iterator 遍历的过程中，通过 ArrayList remove 方法删除元素，expectedModCount ！= modCount 就会报错
-        checkForComodification();
-        // 保存当前元素 index
+        // 实际修改值和期望修改值不一样，会抛异常，也是上面问题的答案
+        if (modCount != expectedModCount)
+            throw new ConcurrentModificationException();
         int i = cursor;
-        if (i >= size)
+        // index 位置判断
+        if (i >= limit)
             throw new NoSuchElementException();
-        Object[] elementData = ArrayList.this.elementDa
+        Object[] elementData = ArrayList.this.elementData;
         if (i >= elementData.length)
-            throw new ConcurrentModificationException()
-        // cursor 指向下一个元素 index
+            throw new ConcurrentModificationException();
+        // 当返回值后，cursor 就指向了下一个元素的 index
         cursor = i + 1;
-        // lastRet 赋值为最新返回的元素 index
         return (E) elementData[lastRet = i];
     }
-    
+    /**
+	 * 删除元素
+	 */
     public void remove() {
+        // 上一个返回元素的 index<0 抛异常
         if (lastRet < 0)
             throw new IllegalStateException();
-        checkForComodification();
+        if (modCount != expectedModCount)
+            throw new ConcurrentModificationException();
         try {
+            // 删除上一个返回的元素（涉及到数组的复制和移位）
             ArrayList.this.remove(lastRet);
+            // 然后下一个index就指向被删除的元素的index，保证连续性
             cursor = lastRet;
             lastRet = -1;
-            // remove 方法删除元素，会 同步 expectedModCount 和 modCount
+            // 同步实际修改值和期望修改值
             expectedModCount = modCount;
+            // 总个数减一
+            limit--;
         } catch (IndexOutOfBoundsException ex) {
-            throw new ConcurrentModificationException()
+            throw new ConcurrentModificationException();
         }
+    }
+    ...
+}
+```
+
+##### Q6：LinkedList 常见成员变量及含义？
+
+LinkedList 实现了 List 和 Qeque 两个接口，一般用它来完成堆栈或者队列的数据结构。内部是通过链表实现的，每个节点都含有前驱节点、后驱节点。
+
+```java
+/**
+ * LinkedList 含有的元素数量
+ */
+transient int size = 0;
+/**
+ * LinkedList 的第一个节点
+ */
+transient Node<E> first;
+/**
+ * LinkedList 的最后一个节点
+ */
+transient Node<E> last;
+
+private static class Node<E> {
+    E item;
+    Node<E> next;
+    Node<E> prev;
+    Node(Node<E> prev, E element, Node<E> next) {
+        this.item = element;
+        this.next = next;
+        this.prev = prev;
     }
 }
 ```
 
-LInkedList  内部是怎么存放数据的
+##### Q7：LinkedList 添加/删除元素源码分析？
 
-LInkedList  实现了 List 和 Queue 两个接口，添加和删除操作怎么实现
+LinkedList 实现了 List 和 Qeque 两个接口，所以它的添加方法有多个
 
 ```java
 /**
- * Adds the specified element as the tail (last element) of this list.
- *
- * @param e the element to add
- * @return {@code true} (as specified by {@link Queue#offer})
- * @since 1.5
+ * Deque 接口的添加元素方法，在LinkedList的结尾处添加，除此之外，还有 offerFirst offerLast
  */
 public boolean offer(E e) {
     return add(e);
 }
-
 /**
- * Appends the specified element to the end of this list.
- *
- * <p>This method is equivalent to {@link #addLast}.
- *
- * @param e element to be appended to this list
- * @return {@code true} (as specified by {@link Collection#add})
+ * List 接口的添加元素方法，在LinkedList的结尾处添加，除此之外，还有addFirst addLast
  */
 public boolean add(E e) {
     linkLast(e);
     return true;
 }
-
- /**
-  * Links e as last element.
-  */
- void linkLast(E e) {
+/**
+ * Deque 接口的添加元素方法，在LinkedList的头部添加
+ */
+public void push(E e) {
+    addFirst(e);
+}
+/**
+ * 「尾插法」添加元素的方法
+ */
+void linkLast(E e) {
      final Node<E> l = last;
+     // Node(Node<E> prev, E element, Node<E> next)
      final Node<E> newNode = new Node<>(l, e, null);
      last = newNode;
      if (l == null)
@@ -357,21 +339,52 @@ public boolean add(E e) {
      size++;
      modCount++;
  }
+/**
+ * 「头插法」添加元素的方法
+ */
+private void linkFirst(E e) {
+    final Node<E> f = first;
+    final Node<E> newNode = new Node<>(null, e, f);
+    first = newNode;
+    if (f == null)
+        last = newNode;
+    else
+        f.prev = newNode;
+    size++;
+    modCount++;
+}
 ```
 
-LinkedList 的 add 和 offer 方法是完全等效的，都是在链表的尾部添加元素，具体的实现是 linkLast() 方法来完成，LinkedList 中每个节点是这样的
+LinkedList 实现了 List 和 Qeque 两个接口，所以它的删除方法有多个
 
 ```java
- private static class Node<E> {
-     E item;
-     Node<E> next;
-     Node<E> prev;
-     Node(Node<E> prev, E element, Node<E> next) {
-         this.item = element;
-         this.next = next;
-         this.prev = prev;
-     }
- }
+/**
+ * remove 和 pop 都是从头部取值，如果为空，会抛出异常
+ */
+public E remove() {
+    return removeFirst();
+}
+public E pop() {
+    return removeFirst();
+}
+public E removeFirst() {
+    final Node<E> f = first;
+    if (f == null)
+        throw new NoSuchElementException();
+    return unlinkFirst(f);
+}
+private E unlinkFirst(Node<E> f) {
+    final E element = f.item;
+    final Node<E> next = f.next;
+    f.item = null;
+    f.next = null; // help GC
+    first = next;
+    if (next == null)
+        last = null;
+    else
+        next.prev = null;
+    size--;
+    modCount++;
+    return element;
+}
 ```
-
-其中 next 指向下一个节点， prev 指向前一个节点。
