@@ -8,7 +8,7 @@
 
   其他：sort(Comparator c) subList(int startIndex, int endIndex) toArray()
 
-##### Q2：ArrayList 的常见成员变量及含义？
+##### Q2：ArrayList 的常见成员变量和常量及含义？
 
 ```java
 /**

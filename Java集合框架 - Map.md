@@ -1,16 +1,10 @@
-HashMap 通过不同构造函数创建对象后，初始状态什么样的
-
-HashMap 添加和删除元素源码分析
-
-HashMap 的扩容机制，HashMap 的容量为什么必须是 2 的次幂，而它又是如何保证的
-
-HashMap 常用的成员常量
+##### Q1：HashMap 常见成员变量和常量及含义？
 
 ```java
 /**
  * capacity 默认初始值 16，且 capacity 的值只能是 2 的次幂
  */
-static final int DEFAULT_INITIAL_CAPACITY = 1 << 4; // aka 16
+static final int DEFAULT_INITIAL_CAPACITY = 1 << 4;
 /**
  * capacity 的最大值
  */
@@ -24,23 +18,14 @@ static final float DEFAULT_LOAD_FACTOR = 0.75f;
  */
 static final int TREEIFY_THRESHOLD = 8;
 /**
- * The bin count threshold for untreeifying a (split) bin during a
- * resize operation. Should be less than TREEIFY_THRESHOLD, and at
- * most 6 to mesh with shrinkage detection under removal.
+ * 红黑树转为链表的分界值
  */
 static final int UNTREEIFY_THRESHOLD = 6;
 /**
- * The smallest table capacity for which bins may be treeified.
- * (Otherwise the table is resized if too many nodes in a bin.)
- * Should be at least 4 * TREEIFY_THRESHOLD to avoid conflicts
- * between resizing and treeification thresholds.
+ * 链表转红黑树时，所需的最小元素数量
  */
 static final int MIN_TREEIFY_CAPACITY = 64;
-```
 
-HashMap 常用的成员变量
-
-```java
 /**
  * 存放所有元素的 Node 数组
  */
@@ -50,51 +35,40 @@ transient Node<K,V>[] table;
  */
 transient Set<Map.Entry<K,V>> entrySet;
 /**
- * The number of key-value mappings contained in this map.
+ * HashMap 存储的元素个数
  */
 transient int size;
 /**
  * 加载因子
  */
 final float loadFactor;
- /**
-  * 下一次需要扩容的值 (capacity * load factor).
-  */
+/**
+ * 下一次需要扩容的值 (capacity * loadFactor).
+ */
 int threshold;
 ```
 
-##### HashMap 的构造函数
+##### Q2：HashMap 通过不同构造函数创建后的初始状态？
 
 HashMap 底层基于哈希表，采用数组存放数组，使用链表来解决哈希碰撞，还引入红黑树解决链表长度过长导致的查询速度下降问题。它有三个常见构造函数
 
 ```java
 /**
- * Constructs an empty <tt>HashMap</tt> with the default initial capacity
- * (16) and the default load factor (0.75).
+ * 空参数的构造函数，加载因子设置为默认值 0.75
  */
 public HashMap() {
-    this.loadFactor = DEFAULT_LOAD_FACTOR; // all other fields defaulted
+    this.loadFactor = DEFAULT_LOAD_FACTOR; 
 }
 
- /**
-  * Constructs an empty <tt>HashMap</tt> with the specified initial
-  * capacity and the default load factor (0.75).
-  *
-  * @param  initialCapacity the initial capacity.
-  * @throws IllegalArgumentException if the initial capacity is negative.
-  */
- public HashMap(int initialCapacity) {
-     this(initialCapacity, DEFAULT_LOAD_FACTOR);
- }
+/**
+ * 设置初始容量，加载因子设置为默认值 0.75
+ */
+public HashMap(int initialCapacity) {
+    this(initialCapacity, DEFAULT_LOAD_FACTOR);
+}
 
 /**
- * Constructs an empty <tt>HashMap</tt> with the specified initial
- * capacity and load factor.
- *
- * @param  initialCapacity the initial capacity
- * @param  loadFactor      the load factor
- * @throws IllegalArgumentException if the initial capacity is negative
- *         or the load factor is nonpositive
+ * 设置加载因子，并根据初始容量，设置下一次扩容的值
  */
 public HashMap(int initialCapacity, float loadFactor) {
     if (initialCapacity < 0)
@@ -108,7 +82,7 @@ public HashMap(int initialCapacity, float loadFactor) {
 }
 
 /**
- * Returns a power of two size for the given target capacity.
+ * 返回一个比入参大的最近的 2 的次冥
  */
 static final int tableSizeFor(int cap) {
     int n = cap - 1;
@@ -123,16 +97,33 @@ static final int tableSizeFor(int cap) {
 
 空入参的构造函数，只设置了加载因子 loadFactor 为默认值，这时候 table 为 null， threshold 为 0。
 
-有两个入参的构造函数会对入参先进行校验，如果正常了，会设置 加载因子 loadFactor 的值，然后通过 tableSizeFor() 方法计算 threshold 的值。这时候 table 为 null，threshold 为 2次幂。
+有两个入参的构造函数会对入参先进行校验，如果正常，会设置 加载因子 loadFactor 的值，然后通过 tableSizeFor() 方法计算 threshold 的值。这时候 table 为 null，threshold 为 2次幂。
 
-这里先分析下，tableSizeFor 方法的作用就是返回一个 比入参大的最近的 2 次幂。
+##### Q3：HashMap 为什么容量必须是 2 的次冥，又是如何保证的？
+
+HashMap 存放元素的时候，都是根据 key 来确定元素在 table数组中的位置的，那么这个计算地址的方法是否高效就影响了 HashMap 的存取效率。
+
+首先，需要计算 key 的hash 值，为了减少碰撞率，让 hash 值的低16位也参与影响了最后的返回值。
+
+```java
+static final int hash(Object key) {
+    int h;
+    return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+}
+
+index = (length - 1) & hash
+```
+
+然后确定该元素在 table 数组的位置就用到了「容量必须是 2 的次冥」这个性质。将数组长度减一，就会变成「11..11」再和元素 hash 值相与取模，就可以得到一个数组中的位置。
+
+创建 HashMap 时，tableSizeFor 就是用来保证数组长度一定是  2 次幂。
 
 ```java
 // 2 次幂的特点是二进制标识的时候，只有一位是 1，剩下的都是 0，那么我们要取一个数最近的 2 次幂，就把这个数二进制最左边的1的左边位置设置 1 ，然后剩下的位置全部设置 0。
 // 我们都知道 >>> 是无符号右移，左边的位置补 0 
-// 为了防止输入的值 就是 2 次幂
+// 为了防止输入的值 就是 2 次幂，先对入参减一
 int n = cap - 1;
-// 从 >>>1 到 >>>16 保证了 32位的int值能把左边全部到设置为 1
+// 从 >>>1 到 >>>16 保证了一共 32 位的 int 值，左边全部设置为 1
 n |= n >>> 1;
 n |= n >>> 2;
 n |= n >>> 4;
@@ -142,7 +133,7 @@ n |= n >>> 16;
 return (n < 0) ? 1 : (n >= MAXIMUM_CAPACITY) ? MAXIMUM_CAPACITY : n + 1;
 ```
 
-##### HashMap 增加元素流程
+##### Q4：HashMap 添加元素源码分析和扩容机制？
 
 ```java
 public V put(K key, V value) {
@@ -156,8 +147,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
     Node<K,V> p; 
     // table 的容量 capacity
     int n;
-    // 某个元素通过 (capacity - 1) & hash 计算出的 在数组中的位置
-    // (capacity - 1) & hash 当 capacity 是 2次幂的时候实际上就是 hash % (capacity - 1)，也就是容量有要求的原因
+    // 某个元素通过 (capacity - 1) & hash 计算出在数组中的位置
     int i;
     // 如果 table 是空值，需要通过 resize() 方法来初始化，然后再设置 n 为当前数组的容量
     if ((tab = table) == null || (n = tab.length) == 0)
@@ -175,7 +165,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
         // 如果插入元素的 hash 和 key 与已经存在元素的 hash、key 完全相同，e 就会设置为一个重复元素标志
         if (p.hash == hash && ((k = p.key) == key || (key != null && key.equals(k))))
             e = p;
-        // 进入插入元素的流程，先判断当前位置上 hash 碰撞所形成的链表是否已经转为 红黑树，如果是红黑树就完成树的操作
+        // 进入插入元素的流程，先判断当前位置上 hash 碰撞所形成的链表是否已经转为红黑树，如果是红黑树就完成树的操作
         else if (p instanceof TreeNode)
             e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
         // 如果不是树，就顺着链表向后查找
@@ -184,7 +174,7 @@ final V putVal(int hash, K key, V value, boolean onlyIfAbsent, boolean evict) {
                 if ((e = p.next) == null) {
                     // 找到链表结尾，并插入，binCount ＞ 8 了，那说明链表长度也超过了转为树的分界值 8
                     p.next = newNode(hash, key, value, null);
-                    if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
+                    if (binCount >= TREEIFY_THRESHOLD - 1)
                         // 将 table 某个位置上的链表转为红黑树
                         treeifyBin(tab, hash);
                     break;
@@ -257,11 +247,11 @@ final void treeifyBin(Node<K,V>[] tab, int hash) {
 
 无论是在`put`还是`treeify`时，都依赖于`resize`，它的重要性不言而喻。它不仅可以调整大小，还能调整树化和反树化（从树变为链表）所带来的影响。
 
-table == null size == 0 threshold == 0 loadFractor = 0.75
+resize 一种调用情况是在空参数构造函数创建 HashMap 后，添加第一个元素。这时 table == null size == 0 threshold == 0 loadFractor = 0.75，然后设置 newCap 为默认容量 16，扩容临界值 newThr = 16*0.75。
 
-table  == null  size == 0 threshold == 2次幂  loadFractor = 0.75
+另一种是在指定容量大小的构造函数创建 HashMap 后，添加第一个元素，这时 table  == null  size == 0 threshold == 2次幂  loadFractor = 0.75，然后就把初始化时的扩容临界值 threshold 设置 newCap，此时 newThr = 0，后面会设置newThr 为 newCap*0.75
 
-table  != null  size == 11 threshold ==16  loadFractor = 0.75
+还有一种情况就是在添加元素时，超过了扩容分界值，这时 table  != null  size == 某个值 threshold ==2次冥  loadFractor = 0.75，如果扩容前容量 size 超过 2^30，就把扩容分界值设置为 Integer.MAX_VALUE，如果没有超过就扩容两倍
 
 ```java
 final Node<K,V>[] resize() {
@@ -284,7 +274,7 @@ final Node<K,V>[] resize() {
             newThr = oldThr << 1;
     }
     else if (oldThr > 0) 
-         // 初始化后第一次添加元素，且初始化是设置扩容临界值的，就把初始化时的扩容临界值 threshold 设置 newCap，newThr = 0
+         // 初始化后第一次添加元素，且初始化是设置扩容临界值的，就把初始化时的扩容临界值 threshold 设置 newCap，此时 newThr = 0
         newCap = oldThr;
     else {
         // 初始化后第一次添加元素，且初始化是空构造函数，就设置 newCap 为默认容量 16，扩容临界值 newThr = 16*0.75
@@ -355,4 +345,3 @@ final Node<K,V>[] resize() {
     return newTab;
 }
 ```
-
