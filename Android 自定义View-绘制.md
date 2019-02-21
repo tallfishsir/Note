@@ -1,50 +1,44 @@
+##### Q1：View 的 draw 流程？
+
 自定义 View 的绘制主要是在 onDraw() 方法中完成的，另外还涉及到 drawBackground() dispatchDraw() onDrawForeground() 方法，它们统一在 draw() 方法中调度：
 
 ```java
 public void draw(Canvas canvas) {
-    final int privateFlags = mPrivateFlags;
-    final boolean dirtyOpaque = (privateFlags & PFLAG_DIRTY_MASK) == PFLAG_DIRTY_OPAQUE &&
-            (mAttachInfo == null || !mAttachInfo.mIgnoreDirtyState);
-    mPrivateFlags = (privateFlags & ~PFLAG_DIRTY_MASK) | PFLAG_DRAWN;
-  
-    // Step 1, draw the background, if needed
+    ...
+    // 第一步绘制背景
     int saveCount;
     if (!dirtyOpaque) {
         drawBackground(canvas);
     }
-    // skip step 2 & 5 if possible (common case)
     final int viewFlags = mViewFlags;
     boolean horizontalEdges = (viewFlags & FADING_EDGE_HORIZONTAL) != 0;
     boolean verticalEdges = (viewFlags & FADING_EDGE_VERTICAL) != 0;
     if (!verticalEdges && !horizontalEdges) {
-        // Step 3, draw the content
+        // 第二步绘制自己
         if (!dirtyOpaque) onDraw(canvas);
-        // Step 4, draw the children
+        // 第三步绘制子View
         dispatchDraw(canvas);
         drawAutofilledHighlight(canvas);
-        // Overlay is part of the content and draws beneath Foreground
         if (mOverlay != null && !mOverlay.isEmpty()) {
             mOverlay.getOverlayView().dispatchDraw(canvas);
         }
-        // Step 6, draw decorations (foreground, scrollbars)
+        // 第四步绘制前景
         onDrawForeground(canvas);
-        // Step 7, draw the default focus highlight
         drawDefaultFocusHighlight(canvas);
         if (debugDraw()) {
             debugDrawFocus(canvas);
         }
-        // we're done...
         return;
     }
 ```
 
 可以看到，整个 draw 的调度过程中最先开始的是 drawBackground() 它负责绘制 View 的背景，接着就会调用 onDraw() 方法来完成 View 本体的绘制，然后通过调用 dispatchDraw() 方法通知子 View 开始绘制，最后会调用 onDrawForeground() 绘制前景。
 
-有一些需要的地方，ViewGroup 没有背景时会绕过 draw 而直接调用 dispatchDraw 方法，所以 ViewGroup 绘制往往是写在 dispatchDraw() 中。
+有一些需要的地方，ViewGroup 没有背景时会绕过 draw 而直接调用 dispatchDraw 方法，所以 ViewGroup 绘制往往是写在 dispatchDraw() 中。ViewGroup 默认会开启一个标志位 willNotDraw，如果需要 ViewGroup 也走 onDraw 方法，需要调用 setWillNotDraw() 来设置关闭。
 
 通常绘制 View 都发生在 onDraw 中，从使用角度可以分为几大类
 
-##### Canvas 基本使用
+##### Q2：Canvas 基本使用？
 
 ###### Canvas.drawXxx()
 
