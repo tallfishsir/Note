@@ -1,29 +1,27 @@
-##### View 的位置体系和 MotionEvent 的位置体系
+##### Q1：View 的位置体系和 MotionEvent 的位置体系？
 
-View 和触碰事件 MotionEvent 有很多关于位置的相似方法名的 api，先加以区分
+View 和触碰事件 MotionEvent 有很多关于位置的相似方法名的 api
 
-###### View 的位置体系
+- View 的位置体系
 
-View 的位置由它的四个顶点来决定，分别对应于 View 的四个属性：left、top、right、bottom，其中 left、top 是 View 左上角的位置坐标，right、bottom 是 View 的右下角的位置坐标。需要注意的是，这里的取值是相对与父 View 的。可以通过 View 的 getXxx()方法来获取。
+  View 的位置由它的四个顶点来决定，分别对应于 View 的四个属性：left、top、right、bottom，其中 left、top 是 View 左上角的位置坐标，right、bottom 是 View 的右下角的位置坐标。需要注意的是，这里的取值是相对与父 View 的，可以通过 View 的 getXxx()方法来获取。
 
-从 Android 3.0 开始，View增加了另外几个参数：x、y、translationX、translationY。其中 x、y 是 View 左上角的坐标，translationX、translationY 是 View 左上角相对于父 View 的偏移量。这几个参数也是相对于父 View 的坐标，translationX、translationY 默认值是 0。可以通过 getXxx() 方法获取。
+  从 Android 3.0 开始，View增加了另外几个参数：x、y、translationX、translationY。其中 x、y 是 View 左上角的坐标，translationX、translationY 是 View 左上角相对于父 View 的偏移量。这几个参数也是相对于父 View 的坐标，translationX、translationY 默认值是 0。可以通过 getXxx() 方法获取。
 
-在初始状态时，偏移量都是为 0 的，x、y 和 left、top 是相等的。但当 View 发生了偏移，left 等值不会发生变化，而 x、y 会进行改变，两者之间的换算关系是：
+  在初始状态时，偏移量都是为 0 的，x、y 和 left、top 是相等的。但当 View 发生了偏移，top 和 left 等值不会发生变化，此时发生变化的是 x、y 、translationX、translationY，它们之间的换算关系是：
 
-```java
-x = left + translationX
-y = top + translationY
-```
+  ```java
+  x = left + translationX
+  y = top + translationY
+  ```
 
-###### MotionEvent 的位置体系
+- MotionEvent 的位置体系
 
-MotionEvent 是手指触碰屏幕后产生的事件，这个事件也是有其位置的。
+  MotionEvent 是手指触碰屏幕后产生的事件，这个事件也是有其位置的。MotionEvent.getX/getY 获取的是触摸事件相对于当前 View 左上角的坐标。MotionEvent.getRawX/getRawY 获取的是触摸事件相对于屏幕左上角的坐标。
 
-MotionEvent.getX/getY 获取的是触摸事件相对于当前 View 左上角的坐标。
+  TouchSlop 是系统能识别出的被认为是滑动的最小距离，可以通过 ViewConfiguration.get(getContext()).getScaledTouchSlop() 来获取这个和系统设备有关的常量。
 
-MotionEvent.getRawX/getRawY 获取的是触摸事件相对于屏幕左上角的坐标。
-
-##### 单点触碰与多点触碰
+##### Q2：单点触碰与多点触碰？
 
 View 的触碰事件分为单点触碰和多点触碰，两者相比较来看，多点触碰多了记录手指的功能。先从如何判断一个触碰事件的类型熟悉。
 
@@ -71,8 +69,7 @@ View 的触碰事件分为单点触碰和多点触碰，两者相比较来看，
   public static final int ACTION_POINTER_INDEX_MASK  = 0xff00;
   public static final int ACTION_POINTER_INDEX_SHIFT = 8;
   public final int getActionIndex() {
-      return (nativeGetAction(mNativePtr) & ACTION_POINTER_INDEX_MASK)
-              >> ACTION_POINTER_INDEX_SHIFT;
+      return (nativeGetAction(mNativePtr) & ACTION_POINTER_INDEX_MASK) >> ACTION_POINTER_INDEX_SHIFT;
   }
   ```
 
@@ -98,11 +95,23 @@ View 的触碰事件分为单点触碰和多点触碰，两者相比较来看，
 
   调用 getPointerId 我们可以从 pointIndex 查找到 pointId。而 pointIndex 除了 getAcionIndex 可以获取外，还可以调用 findPointerIndex 从 pointId 查找到 pointIndex。
 
-##### 触碰事件分发机制
+##### Q3：触碰事件分发机制模型？
 
-View 的结构大致是 PhoneWindow - DecorView - ViewGroup - View。触碰事件在收集后最先传递给 Actvitiy，然后依次传递 PhoneWindow、DecorView、ViewGroup、View，如果都没有消费，那么触碰事件按照之前传递顺序返回到 Activity。
+Activity 实现了 Window.Callback 接口，所以触碰事件在收集后，最先传给 Activity 的dispatchTouchEvent() 方法，然后通过 PhoneWindow 的 superDispatchTouchEvent() 传递给 DecorView，再由 DecorView 进入 ViewGroup/View 的触碰事件分发机制。如果所有的 View 都没有消费，那么触碰事件会再返回到 Activity.onTouchEvent 处理。
 
-事件分发机制实际上是一个责任链模式，整个过程汇总涉及到三个重要方法：
+```java
+public boolean dispatchTouchEvent(MotionEvent ev) {
+    if (ev.getAction() == MotionEvent.ACTION_DOWN) {
+        onUserInteraction();
+    }
+    if (getWindow().superDispatchTouchEvent(ev)) {
+        return true;
+    }
+    return onTouchEvent(ev);
+}
+```
+
+ViewGroup/View 的事件分发机制实际上是一个责任链模式，整个过程汇总涉及到三个重要方法：
 
 1. dispatchTouchEvent()：用于事件的分发，如果事件传递给当前 View，那么此方法一定会被调用。返回结果表示是否消耗当前事件。
 2. onInterceptTouchEvent()：仅 ViewGroup 有这个方法，在 dispatchTouchEvent() 中调用，用来判断当前 View 是否拦截当前事件。返回结果表示是否拦截当前事件。
@@ -127,12 +136,11 @@ public boolean dispatchTouchEvent(MotionEvent event){
 
 > 1. 同一个事件序列是从手指从接触屏幕开始，手指离开屏幕结束，在这个过程中产生的一系列事件。
 > 2. 某个 ViewGroup 决定拦截了某事件，那么同一个事件序列内的所有事件都会直接交给它处理，并且它的 onInterceptTouchEvent 不会再被调用。
-> 3. 某个 View 开始处理事件时，如果 onTouchEvent 中不消耗 ACTION_DOWN 事件（返回 false），那么同一个事件序列的其他事件也不会再交给它处理。
-> 4. 某个 View 处理事件时，如果 onTouchEvent 中不消耗 ACTION_DOWN 以外的事件，那么这个点击事件就会消失，父 View 的 onTouchEvent 不会被调用。最终消失的点击事件会传递给 Activity 处理。
-> 5. ViewGroup 的 onInterceptTouchEvent 默认不拦截任何事件，返回 false。
-> 6. View 的 onTouchEvent 默认消耗任何事件，返回 true。
+> 3. 某个 View 开始处理事件时，如果 onTouchEvent 中不消耗 ACTION_DOWN 事件（返回 false），那么同一个事件序列的其他事件也不会再交给它处理；如果 onTouchEvent 中不消耗 ACTION_DOWN 以外的事件，那么这个点击事件就会消失，父 View 的 onTouchEvent 不会被调用。最终消失的点击事件会传递给 Activity 处理。
+> 4. ViewGroup 的 onInterceptTouchEvent 默认不拦截任何事件，返回 false。
+> 5. View 的 onTouchEvent 默认消耗任何事件，返回 true。
 
-###### ViewGroup 事件分发机制
+##### Q3：ViewGroup 事件分发机制？
 
 ```java
 public boolean dispatchTouchEvent(MotionEvent ev) {
@@ -148,10 +156,9 @@ public boolean dispatchTouchEvent(MotionEvent ev) {
         }
         // 第一步，检查当前 ViewGroup 是否拦截事件
         // 一种情况是事件如果是 ACTION_DOWN 就检查 onInterceptTouchEvent
-        // 一种情况是 mFirstTouchTarget 不为空（是在子View处理了此事件序列），换句话说，如果 ViewGroup 之前拦截了事件，子View没有处理事件，那 mFirstTouchTarget 就是 null，就不会再去判断是否需要拦截了。
+        // 一种情况是 mFirstTouchTarget 不为空（也就是子View处理了此事件序列），换句话说，如果 ViewGroup 之前拦截了事件，子View没有处理事件，那 mFirstTouchTarget 就是 null，就不会再去判断是否需要拦截了。
         final boolean intercepted;
-        if (actionMasked == MotionEvent.ACTION_DOWN
-                || mFirstTouchTarget != null) {
+        if (actionMasked == MotionEvent.ACTION_DOWN || mFirstTouchTarget != null) {
             // 上面第二种情况，子View成功处理了事件，mFirstTouchTarget != null，就会进入。如果子View调用了 requestDisallowInterceptTouchEvent 方法设置 FLAG_DISALLOW_INTERCEPT 为 true。就不会再判断当前 View 的onInterceptTouchEvent 的返回值了，而是直接设置为不拦截
             final boolean disallowIntercept = (mGroupFlags & FLAG_DISALLOW_INTERCEPT) != 0;
             if (!disallowIntercept) {
@@ -161,7 +168,7 @@ public boolean dispatchTouchEvent(MotionEvent ev) {
                 intercepted = false;
             }
         } else {
-            // 上面两种情况之外，就是已经在事件序列中并且当前 View 拦截了事件，那么后续的事件给当前 View 处理
+            // 上面两种情况之外，也就是当前 View 拦截了事件，那么后续的事件给当前 View 处理
             intercepted = true;
         }
         ...
@@ -217,7 +224,7 @@ public boolean dispatchTouchEvent(MotionEvent ev) {
 }
 ```
 
-###### View 事件分发机制
+##### Q4：View 事件分发机制？
 
 上面分析了 ViewGroup 的dispatchTouchEvent 方法，在子 View 都没有处理事件的情况下，会调用 ViewGroup.super.dispatchTouchEvent() ，也就是 View 的dispatchTouchEvent。
 
@@ -309,10 +316,8 @@ public boolean onTouchEvent(MotionEvent event) {
                     }
                     // UnsetPressedState 实现 Runnable，若干时间后 setPressed(false)
                     if (prepressed) {
-                        postDelayed(mUnsetPressedState,
-                                ViewConfiguration.getPressedStateDuration());
+                        postDelayed(mUnsetPressedState, ViewConfiguration.getPressedStateDuration());
                     } else if (!post(mUnsetPressedState)) {
-                        // If the post failed, unpress right now
                         mUnsetPressedState.run();
                     }
                     removeTapCallback();
@@ -323,7 +328,6 @@ public boolean onTouchEvent(MotionEvent event) {
                 if (event.getSource() == InputDevice.SOURCE_TOUCHSCREEN) {
                     mPrivateFlags3 |= PFLAG3_FINGER_DOWN;
                 }
-                // todo
                 mHasPerformedLongPress = false;
                 boolean isInScrollingContainer = isInScrollingContainer();
                 if (isInScrollingContainer) {
@@ -376,3 +380,34 @@ public boolean onTouchEvent(MotionEvent event) {
 }
 ```
 
+##### Q5：View 的滑动冲突解决？
+
+常见的滑动冲突有三种场景：
+
+1. 外部滑动和内部滑动的方向不一致
+2. 外部滑动和内部滑动的方向一致
+3. 以上两种情况的嵌套
+
+- 外部滑动和内部滑动的方向不一致
+
+  这种冲突情况可以根据滑动过程中的两个点的坐标判断是哪个方向的滑动，再决定由哪个 View 来拦截事件。通用的解决方案有两种：
+
+  - 外部拦截法
+
+    点击事件都先经过 父View 的拦截处理，如果需要就拦截，如果不需要就不拦截。
+
+    1. 重写父 View 的 onInterceptTouchEvent() 方法，onInterceptTouchEvent() 中 ACTION_DOWN 返回 false，使得事件可以传递到子 View。如果一旦回 true，父 View 会直接拦截后续的事件，不会传递给子 View。
+    2. onInterceptTouchEvent() 中 ACTION_MOVE 根据需要，如果父 View 拦截就返回 true，如果子 View 就返回 false。
+    3. onInterceptTouchEvent() 中 ACTION_UP 返回 false。
+
+  - 内部拦截法
+
+    父 View 不拦截任何事件，所有的事件都先交给 子View ，如果子View 需要就直接消耗，否则就交给父View 处理。
+
+    1. 重写父 View 的 onInterceptTouchEvent() 方法，onInterceptTouchEvent() 的 ACTION_DOWN 返回 false 不拦截，剩下的都返回 true 拦截。
+    2. 重写子 View 的 dispatchTouchEvent() 方法，dispatchTouchEvent() 中 ACTION_DOWN 调用 parent.requestDisallowInterceptTouchEvent(true) 不允许父 View 拦截事件。
+    3. 子 View 的 dispatchTouchEvent() 中 ACTION_MOVE ，如果父 View 需要就调用  parent.requestDisallowInterceptTouchEvent(false) 允许父 View 拦截事件，而父 View 的 onInterceptTouchEvent 中除了 ACTION_DOWN 都拦截了事件。
+
+- 外部滑动和内部滑动的方向一致
+
+  这种冲突情况 ，可以依靠业务上的逻辑规定，当某种状态需要哪个 View 来拦截事件。
