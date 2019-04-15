@@ -222,7 +222,7 @@ public void execute(Runnable command) {
         else if (workerCountOf(recheck) == 0)
             addWorker(null, false);
     }
-    // 到流程到此，有可能是线程池不在RUNNING状态或者阻塞队列已满，无法加入任务
+    // 到流程到此，有可能是线程池不在RUNNING状态或者阻塞队列已满，就添加非核心线程
     // 所以就创建新的线程去执行任务，如果创建线程失败，就执行rejectedExecutionHandler处理任务
     else if (!addWorker(command, false))
         reject(command);
@@ -278,7 +278,7 @@ private boolean addWorker(Runnable firstTask, boolean core) {
         if (t != null) {
             final ReentrantLock mainLock = this.mainLock;
             mainLock.lock();
-            // 在读写锁中把创建的worker对象添加到workers（HashMap）中。
+            // 在读写锁中把创建的worker对象添加到workers（HashSet）中。
             try {
                 int rs = runStateOf(ctl.get());
                 if (rs < SHUTDOWN ||
@@ -303,7 +303,7 @@ private boolean addWorker(Runnable firstTask, boolean core) {
             }
         }
     } finally {
-        // 线程启动失败，则从 wokers 中移除 w 并递减 wokerCount
+        // 最终发，则从 wokers 中移除 w 并递减 wokerCount
         if (! workerStarted)
             // 递减wokerCount会触发tryTerminate方法
             addWorkerFailed(w);
