@@ -1,6 +1,6 @@
 ##### Q1：Android Handler 原理和源码分析？
 
-Android 中通过 Handler，可以将任务转移到 Handler 所在的线程中执行。底层通过 ThreadLocal 保存不同线程的 Looper 对象，然后循环获取 Looper 对象的成员变量 MessageQueue 中的任务，最后交给 Handler 处理，实现了线程的转移。
+Android 中通过 Handler，将任务转移到 Handler 所在的线程中执行。底层通过 ThreadLocal 保存不同线程的 Looper 对象，然后循环获取 Looper 对象的成员变量 MessageQueue 中的任务，最后交给 Handler 处理，实现了线程的转移。
 
 - ThreadLocal —— 同一个ThreadLocal 对象在不同的线程中可以获取/保存不同的值
 
