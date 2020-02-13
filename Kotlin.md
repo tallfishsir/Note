@@ -1,4 +1,4 @@
-基础语法 
+# 基础语法 
 
 ## 变量
 
@@ -95,15 +95,24 @@ as 是用来转换类型的常规运算符，如果被转换的值不是试图�
 
 ### Kotlin 基础数据类型
 
-Koltin 的基本数据类型包括：Byte、Short、Int、Long、Double、Float、Char、Boolean等。Kotlin 并不区分基本数据类型和包装类型，在运行时，数字类型会尽可能的使用最高效的方式表示，对于变量、属性——Kotlin 的 Int 类型会编译成 Java 的基本数据类型 int ，泛型类中用作泛型类型参数的基本数据类型会被编译成 Java 对应的包装类型。
+Kotlin 的基本数据类型包括：Byte、Short、Int、Long、Double、Float、Char、Boolean等。Kotlin 并不区分基本数据类型和包装类型，在运行时，数字类型会尽可能的使用最高效的方式表示，对于变量、属性——Kotlin 的 Int 类型会编译成 Java 的基本数据类型 int ，泛型类中用作泛型类型参数的基本数据类型会被编译成 Java 对应的包装类型。
 
 Kotlin 中处理数字转换时，不会自动把数字从一个类型转换成另一个类型，必须进行显式转换。每一种基本类型都定义了转换函数：toByte()、toShort()等。
+
+### Kotlin 字符串
+
+Kotlin 中通过双引号来定义一个字符串，它是不可变对象。通过三引号来定义一个原生字符串，原生字符串的意义是最终的打印格式和引号中的内容格式一致，不会解释转化转移字符。通过 ${} 来定义字符串模板。
+
+字符串的判等型主要有两种类型：
+
+- 结构相等：通过操作符「==」来判断两个对象的内容是否相等
+- 引用相等：通过操作符「===」来判断两个对象的引用是否一样。
 
 ### Kotlin 根类型
 
 Any 类型是 Kotlin 所有非空类型的超类型，和 Object 作为 Java 的类层级结构的根类型差不多。但在 Java 中 Object 只是所有引用类型的超类型，而基本数据类型不在其中。但 Any 是所有非空类型的超类型，包括基础数据类型。
 
-Any? 类型是 Kotlin 的所有类型的超类型。在底层，Any 类型对应 java.lang.Object，当 Koltin 函数使用 Any 时，它会被编译成 Java 字节码中 Object。
+Any? 类型是 Kotlin 的所有类型的超类型。在底层，Any 类型对应 java.lang.Object，当 Kotlin 函数使用 Any 时，它会被编译成 Java 字节码中 Object。
 
 ### Kotlin 的 “void”：Unit 类型
 
@@ -209,6 +218,8 @@ fun sum(x: Int = 1, y: Int = 2): Int{
 - 参数的默认值时可以省略
 - 返回值如果是可以根据 return 语句推断出，是可以省略的
 
+Kotlin 通过 **varargs** 关键字来定义函数中的可变函数，类似 Java 中的 「..」，但 Java 中的可变参数必须是最后一个参数，Kotlin 中没有这个限制。两者都可以在函数体中以数组的方式来使用可变参数变量。
+
 #### 函数的调用
 
 当调用函数时，可以显式表明一些参数的名称，当调用一个函数时，指明了一个参数的名称，为了避免混淆，那它之后的参数都需要标明名称。
@@ -241,6 +252,8 @@ var StringBuilder.lastChar : Char
         this.setCharAt(length - 1, value)
     }
 ```
+
+当扩展函数和现有类的成员方法同时存在时，Kotlin 将会默认使用类的成员方法。
 
 ### 高阶函数
 
@@ -343,7 +356,7 @@ public inline fun <T> T.apply(block: T.() -> Unit): T { block(); return this }
 
 ## 类和接口
 
-声明类时，使用关键字 class ，类的属性完全代替了字段和访问器方法，声明成 val 的属性是只读的，所以自定义 访问器方法时只有 getter 方法，声明成 var 的属性时可变的，所以自定义访问器方法时有 setter 和 getter 方法。
+声明类时，使用关键字 class ，类的属性完全代替了字段和访问器方法，Kotlin 中的属性除非显式的声明延迟初始化，不然就需要指定属性的默认值。声明成 val 的属性是只读的，所以自定义访问器方法时只有 getter 方法，声明成 var 的属性时可变的，所以自定义访问器方法时有 setter 和 getter 方法。
 
 ```kotlin
 class Person {
@@ -357,6 +370,8 @@ class Person {
 }
 ```
 
+
+
 声明接口时，使用关键字 interface，接口的方法可以有默认实现。
 
 ```
@@ -368,7 +383,7 @@ interface Clickable{
 
 ### 构造函数
 
-Kotlin 的构造函数区分了主构造函数和从构造函数，主构造函数在类体外部声明，从构造函数在类体内部声明，同时也允许在初始化语句块中添加额外的初始化的逻辑，
+Kotlin 的构造函数区分了主构造函数和从构造函数，主构造函数在类体外部声明，从构造函数在类体内部声明，同时也允许在初始化语句块中添加额外的初始化的逻辑。
 
 #### 主构造函数
 
@@ -413,7 +428,7 @@ class Secreive private constructor(){}
 
 #### 从构造函数
 
-从构造函数是在函数体内部使用 **constructor** 关键字声明。如果类声明了主构造函数，从构造函数需要使用 this 关键字来调用主构造函数。
+从构造函数是在函数体内部使用 **constructor** 关键字声明。如果类声明了主构造函数，从构造函数需要使用 this 关键字来调用主构造函数。主构造函数会作为从构造函数的第一条语句。
 
 ```kotlin
 class Person constructor(val name: String){
@@ -422,7 +437,11 @@ class Person constructor(val name: String){
 }
 ```
 
-主构造函数，从构造函数，初始化代码块的执行顺序：初始化代码块是在主构造函数之前执行，然后执行主构造函数，然后执行从构造函数
+#### init 语句块
+
+init 语句块属于主构造函数的一部分，如果需要在初始化时进行其他的额外操作，就可以使用 init 语句块。当有多个 init 语句块时，他们会在对象被创建时按照类中从上到下的顺序先后执行。
+
+主构造函数，从构造函数，初始化代码块的执行顺序：先主构造函数执行，然后执行初始化代码块，然后执行从构造函数。
 
 ### 可见性限制修饰符
 
@@ -684,7 +703,7 @@ val (a, b) = p
 ```kotlin
 class Point(val x: Int, val y: Int){
     operator fun component1() = x
-    operator fun component2() = x
+    operator fun component2() = y
 }
 ```
 
