@@ -47,6 +47,21 @@ class Demo{
 
 lateinit 主要用于 var 声明的变量中，但它不能用于基础数据类型：Int、Long 等，需要使用 Integer 这种包装类代替。
 
+另外可以利用代码来判断一个全局变量是否已经完成了初始化
+
+```
+class Demo{
+    lateinit var params1 : String
+    fun printParams() {
+       if(!::param1.isInitalized){
+       		...
+       }
+    }
+}
+```
+
+
+
 ## Kotlin 变量的类型系统
 
 与 Java 相比，Kotlin 引入了可空的类型和只读的集合，并把数组作为头等公民来支持。
@@ -262,7 +277,7 @@ Kotlin 的高阶函数是以其他函数作为参数或者返回值的函数。
 #### 声明参数中函数类型
 
 ```
-(Int, Int) -> Int
+ClassName.(Int, Int) -> Int
 ```
 
 函数类型格式声明遵循以下几点：
@@ -270,10 +285,11 @@ Kotlin 的高阶函数是以其他函数作为参数或者返回值的函数。
 1. 通过「->」来连接**参数类型**和**返回值类型**，左边是参数类型，右边是返回值类型
 2. 参数类型必须用 () 包裹，如果没有参数，也不能省略括号，多个参数使用 ，分隔
 3. 返回值类型就算是 Unit，也必须显示声明
+4. 函数类型前加上 ClassName 就表示这个函数类型定义在哪个类中，将自动拥有 ClassName 代表的类的上下文
 
 #### 调用含有函数类型参数的函数
 
-当调用含有函数类型参数的函数时，需要传入一个函数的引用。函数的引用有以下方法获取：
+当调用含有函数类型参数的函数时，需要传入一个函数的引用，这里说的函数引用其实就是一个函数类型的对象。函数的引用有以下方法获取：
 
 1. Kotlin 中可以通过两个冒号来实现对于某个类的方法的引用，作为参数
 2. 匿名函数：Kotlin 支持缺省函数名的情况下，直接定义一个函数，作为参数
@@ -299,7 +315,7 @@ Lambda 表达式会被编译成匿名类，每调用一次 Lambda 表达式，�
 
 由于内联的运作方式，对于使用 Lambda 作为参数的函数而言，不是所有使用 Lambda 作为参数的函数可以被内联。一般来说，如果函数参数被直接调用或者传递给另一个 inline 函数，这个函数是可以被内联的。
 
-使用 **inline** 关键字只能提高带有 Lambda 参数的函数的性能，节约了函数调用、为 Lambda 创建匿名类、创建 Lambda 实例对象的开销。
+使用 **inline** 关键字只能提高带有 Lambda 参数的函数的性能，节约了函数调用、为 Lambda 创建匿名类、创建 Lambda 实例对象的开销。但内联函数只允许传递给另一个内联函数，而非内联函数可以自由的传递给其他任何函数。
 
 #### 内联函数 let
 
@@ -354,6 +370,10 @@ public inline fun <T> T.apply(block: T.() -> Unit): T { block(); return this }
 
 调用 T 对象的 apply 函数，在函数范围内，可以任意调用该对象的方法，最后返回该对象。与 run 的区别是 run 返回的是最后一行。适用于对象初始化需要给其属性赋值的情况。
 
+#### noinline
+
+如果一个高阶函数接收了两个及以上的函数类型的参数，这时我们给函数加上 inline 关键字，那么 Kotlin 编译器会自动将所有引用的 Lambda 表达式进行内联。如果我们只想内联其中一个 Lambda 表达式，就需要将不需要内联的参数前使用 **noinline** 关键字进行修饰。
+
 ## 类和接口
 
 声明类时，使用关键字 class ，类的属性完全代替了字段和访问器方法，Kotlin 中的属性除非显式的声明延迟初始化，不然就需要指定属性的默认值。声明成 val 的属性是只读的，所以自定义访问器方法时只有 getter 方法，声明成 var 的属性时可变的，所以自定义访问器方法时有 setter 和 getter 方法。
@@ -394,7 +414,7 @@ class Person constructor(name: String){
 }
 ```
 
-在类名后，construction 和括号围起来的语句块叫作主构造函数。**construction** 关键字用来开始一个主构造函数或者从构造函数的声明。**init** 关键字用来引入一个初始化语句块。初始化语句块包含了在类被创建时指定的代码，并会和主构造函数一起使用。
+在类名后，constructor 和括号围起来的语句块叫作主构造函数。**constructor** 关键字用来开始一个主构造函数或者从构造函数的声明。**init** 关键字用来引入一个初始化语句块。初始化语句块包含了在类被创建时指定的代码，并会和主构造函数一起使用。
 
 当 **construction** 关键字没有注解或者可见性修饰符作用时，可以省略。当定义类时，并没有显式提供一个主构造函数，Kotlin 编译器会自生成一个无参的主构造函数。
 
@@ -738,12 +758,14 @@ class Foo{
 
 #### 声明泛型类
 
-通过在类名后面加上一堆尖括号，并把类型参数放在尖括号内来声明泛型类及泛型接口。吐过一个类继承了泛型类（或者实现了泛型接口），就需要为基础类的泛型形参提供一个类型实参，它可以是一个具体的类型或者另一个类型形参。
+通过在类名后面加上一堆尖括号，并把类型参数放在尖括号内来声明泛型类及泛型接口。通过一个类继承了泛型类（或者实现了泛型接口），就需要为基础类的泛型形参提供一个类型实参，它可以是一个具体的类型或者另一个类型形参。
 
 ```kotlin
-class StringList : List<String>{}
-
-class ArrayList<T> : List<T>{}
+class MyClass<T> {
+    fun methodA(param: T):T {
+        return param
+    }
+}
 ```
 
 #### 声明泛型函数和属性
@@ -760,9 +782,9 @@ val <T> List<T>.penultimate: T
 
 #### 类型参数约束
 
-类型参数约束可以限制作为泛型类和泛型函数的**类型实参**的类型。如果把一个类型指定为泛型**类型形参**的上界约束，在泛型类型具体的初始化中，对应的**类型实参**就必须是这个具体类型的字类型。
+类型参数约束可以限制作为泛型类和泛型函数的**类型实参**的类型。如果把一个类型指定为泛型**类型形参**的上界约束，在泛型类型具体的初始化中，对应的**类型实参**就必须是这个具体类型的子类型。
 
-在泛型声明时，将冒号放在类型参数名称之后，作为类型形参上界的类型在之后。如果类型上界有多个，可以使用 **where** 关键字来实现。
+在泛型声明时，将冒号放在类型参数名称之后，作为类型形参上界的类型。如果类型上界有多个，可以使用 **where** 关键字来实现。
 
 ```kotlin
 fun <T : Number> List<T>.sum(): T {}
@@ -792,9 +814,9 @@ fun <T> isT(value : Any) = value is T
 Error: Cannot check for instance of erased type : T
 ```
 
-如果想要上面这中判断正常运行，就需要将类型参数实化。实化类型参数可以使用内联函数和 **reifield** 关键字来完成。
+如果想要上面这中判断正常运行，就需要将类型参数实化。实化类型参数可以使用 **inline** 内联函数和 **reifield** 关键字来完成。
 
-使用 inline 关键字将一个函数标记为内联函数，编译器会把每一次函数调用都转换成函数实际的代码实现（如果该函数使用了 Lambda 实参，Lambda 的代码也会被内联，不会创建内部类），并且用 reifield 标记类型参数。
+使用 **inline** 关键字将一个函数标记为内联函数，编译器会把每一次函数调用都转换成函数实际的代码实现（如果该函数使用了 Lambda 实参，Lambda 的代码也会被内联，不会创建内部类），并且用 reifield 标记类型参数。
 
 ```kotlin
 inline fun <reifield T> isT(value : Any) = value is T 
@@ -810,7 +832,7 @@ inline fun <reifield T> isT(value : Any) = value is T
 
 - 创建指定为类型参数的类的实例
 - 调用类型参数类的伴生对象的方法
-- 嗲用带实化类型参数函数的时候使用非实化类型形参作为类型形参
+- 调用带实化类型参数函数的时候使用非实化类型形参作为类型形参
 - 把类、属性或者非内联函数的类型参数标记为 reifield
 
 ### 变型
@@ -823,18 +845,38 @@ inline fun <reifield T> isT(value : Any) = value is T
 
 一个泛型类，比如 MutableList\<A> 既不是   MutableList\<B> 的子类型，也不是超类型，就称这个泛型类在该类型参数上是**不变型**的。
 
-如果一个泛型类，比如存在两个实例 A 是 B 的子类型，而且 List\<A> 是 List\<B> 的子类型，就称这个泛型类是**协变**的。
-
 #### 协变和逆变
 
-Java 的泛型本身是不支持协变和逆变的
+有了子类型和超类型的概念，就可以解释什么是协变性和逆变性。
 
-- 可以使用泛型通配符`? extends`来使泛型支持协变，但是「只能读取不能写入加」
+一个**协变类**是一个泛型类（以 List\<T>为例）来说，如果 A 是 B 的子类型，那么List\<A> 是 List\<B> 的子类型，那么就说这个类在该类型参数上具有协变性。
+
+一个**逆变类**是一个泛型类（以 List\<T>为例）来说，如果 A 是 B 的子类型，那么List\<B> 是 List\<A> 的子类型那么就说这个类在该类型参数上具有逆变性。
+
+首先，对于 Java 来说，Java的泛型本身是不支持协变和逆变的，也就是**不变型**。但是可以通过通配符「? extends」和「? super」来解决这个问题：
+
+- 可以使用泛型通配符`? extends`来使泛型支持协变，但是「只能读取不能写入」
 - 可以使用泛型通配符`? super` 来使泛型支持逆变，但是「只能写入不能读取」
 
-一个**协变类**是一个泛型类（以 List\<T>为例），对这种类来说，如果 A 是 B 的子类型，那么List\<A> 是 List\<B> 的子类型，就意味着**子类型化被保留了**。在 Kotlin 中要声明类在某个类型参数上是可以**协变**的，就在该类型参数的名称前加上 **out** 关键字。当类在某个类型参数上声明是协变的，就限制了该类对该类型参数使用的可能性：只能读取不能写入。
+```java
+List<? extends TextView> textViews = new ArrayList<Button>();
+TextView textView = textViews.get(0); // OK
+textViews.add(textView); //  add 会报错，no suitable method found for add(TextView)
 
-一个**逆变类**是一个泛型类（以 List\<T>为例），对这种类来说，如果 A 是 B 的子类型，那么List\<B> 是 List\<A> 的子类型，它可以看作是协变的镜像。在 Kotlin 中要声明类在某个类型参数上是可以**逆变**的，就在该类型参数的名称前加上 **in** 关键字。当类在某个类型参数上声明是逆变的，就限制了该类对该类型参数使用的可能性：只能写入不能读取。
+List<? super Button> buttons = new ArrayList<TextView>();
+Object object = buttons.get(0); // get 出来的是 Object 类型
+buttons.add(button); // add 操作是可以的
+```
+
+和 Java 泛型一样，Kotlin 中的泛型本身也是**不变型**的，但是可以使用关键子「out」和「in」来解决这个问题：
+
+- 在该类型参数的名称前加上 **out** 关键字，声明类在某个类型参数上是可以**协变**的，但是「只能读取不能写入」
+- 在该类型参数的名称前加上 **in** 关键字，声明类在某个类型参数上是可以**逆变**的，但是「只能写入不能读取」
+
+```kotlin
+var textViews: List<out TextView> = List<Button>
+var textViews: List<in TextView> = List<Button>
+```
 
 **out** 和 **in** 修饰符被称为**型变注解**。为了保证类型安全，out 修饰的参数只能出现在函数的返回值位置（out 位置），in 修饰的参数只能出现在函数的参数位置（in 位置）。
 
@@ -845,20 +887,15 @@ class Animal<in T : Number, out R : CharSequence>{
 }
 ```
 
-在类型参数上使用 out 关键字有两个含义：
+在类型参数上使用 **out** 关键字有两个含义：
 
 - 子类型化被会被保留，让该泛型类在该类型参数上变成协变
 - 该类型参数只能用在 out 位置上
 
-在类型参数上使用 in 关键字有两个含义：
+在类型参数上使用 **in** 关键字有两个含义：
 
 - 子类型化会被反转，让该泛型类在该类型参数上变成逆变
 - 该类型参数只能用在 in 位置上，被这个方法消费
-
-和 Java 泛型一样，Kotlin 中的泛型本身也是不可变的。
-
-- 使用关键字 `out` 来支持协变，等同于 Java 中的上界通配符 `? extends`。
-- 使用关键字 `in` 来支持逆变，等同于 Java 中的下界通配符 `? super`。
 
 #### 声明处型变和类型投影
 
@@ -892,7 +929,9 @@ fun <T> copyDate(
 
 #### 星号投影
 
-星号投影用来表明：不知道寰宇泛型实参的任何信息，例如一个包含位置类型的元素的列表可以使用 List\<\*> 来表示。Kotlin 中的 MyType<\*> 对应于 Java 中的 MyType<?> 。
+星号投影用来表明：不知道泛型实参的任何信息。
+
+例如一个包含位置类型的元素的列表可以使用 List\<\*> 来表示。Kotlin 中的`*` 相当于 `out Any`。而 Java 中单个 `?` 号也能作为泛型通配符使用，相当于 `? extends Object`
 
 ## Kotlin 反射和注解
 
@@ -969,4 +1008,56 @@ Kotlin 的元注解有：
 | Target        | 限定了注解使用的场景     |
 | Retention     | 说明的注解的保留时间     |
 | Repeatable    | 注解在同一个可以多次出现 |
+
+## 协程
+
+广义的协程是一种在程序中处理并发任务的方案，也就是这个方案的一个组件。它和线程是一个层级的概念，是一种和线程不同的并发任务解决方案。
+
+Kotlin 中的协程和广义的协程不是一种东西，Kotlin 的协程实际上是一个线程框架，可以看做是 Java 的 Excutor 和 Rxjava，Android 的 AsyncTask、Handler 等是一个层级的东西。
+
+Kotlin 中可以使用以下四种方式创建协程：
+
+- runBlocking
+- GlobalScope 单例对象直接调用 launch 开启协程
+- 通过 CoroutineContext 创建一个 CoroutineScope 对象，再调用 launch 开启协程
+- async/withContext
+
+方法一适用于单元测试的场景，业务开发中不会用到这种方法，因为它是线程阻塞的。
+
+方法二和使用 `runBlocking` 的区别在于不会阻塞线程。但在 Android 开发中同样不推荐这种用法，因为它的生命周期会和 app 一致，且不能取消。
+
+方法三是比较推荐的使用方法，我们可以通过 `context` 参数去管理和控制协程的生命周期（这里的 `context` 和 Android 里的不是一个东西。
+
+```kotlin
+val job = Job()
+val coroutineScope = CoroutineScope(job)
+coroutineScope.launch(Dispatchers.IO) { delay(100) }
+
+job.cancel()
+```
+
+### launch、async 和 withContext 
+
+launch 和 async 都可以开启一个新的协程，但是 launch 只能用于执行一段逻辑，却不能获取执行的结果，因为它的返回值永远都是一个 Job 对象。async 函数可以创建一个协程，并获取它的执行结果。
+
+async 函数必须在协程作用域中才能调用，它会创建一个新的协程并返回一个 Deferred 对象，如果想要获取 async 函数代码块的执行结果，只需要调用 Deferred 对象的 await() 方法。
+
+```kotlin
+ runBlocking {
+    val deffred = async(Dispatchers.IO) { delay(100) }
+    val result = deffred.await()
+}
+```
+
+withContext 是一个挂起函数，可以理解为 async 函数的简化版，调用 withContext 后会立即执行代码块中的代码，同时将当前的协程阻塞住。
+
+launch、async 和 withContext 都可以指定线程参数，常用的 `Dispatchers` ，有以下三种：
+
+- `Dispatchers.Main`：Android 中的主线程
+- `Dispatchers.IO`：针对磁盘和网络 IO 进行了优化，适合 IO 密集型的任务，比如：读写文件，操作数据库以及网络请求
+- `Dispatchers.Default`：适合 CPU 密集型的任务，比如计算
+
+### suspend
+
+withContext 是一个挂起函数，也就是被 suspend 关键字修饰。suspend 不是用来切换线程的，用来标记和提醒，在编译阶段帮助生成切换线程的代码。suspend 关键字可以将任何函数声明为挂起函数，挂起函数只能在其他挂起函数或者协程作用域中被调用。
 
