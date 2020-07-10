@@ -18,9 +18,9 @@ val b : String = "bbb"
 - var：可变引用，这种变量的值可以改变吗，对应 Java 中的非 final 变量
 - val：不可变引用，使用 val 声明的变量不能在初始化后再次赋值，对应 Java 中的 final 变量
 
-### 延迟初始化：by lazy 和 lateinit
+### 延迟初始化
 
-在 Kotlin 编程中，优先使用 val 来声明一个本身不可变的变量，这是一种防御性的编码思维模式，不可变变量意味着更加容易推理，更加安全和可靠。但声明一个 val 变量会带来一个问题，就是初始化变量时机。正常情况下， Kotlin 规定类中的所有非抽象属性成员必须在对象创建的时候被初始化，但 val 一旦被初始化为就不可修改，在 Android 的 Activity 内很多变量都是在 onCreate 中初始化的。所以可以使用 **by lazy** 和 **lateinit** 两种语法实现延迟初始化。
+在 Kotlin 编程中，优先使用 val 来声明一个本身不可变的变量，这是一种防御性的编码思维模式，不可变变量意味着更加容易推理，更加安全和可靠。但声明一个 val 变量会带来一个问题，就是初始化变量时机。正常情况下， Kotlin 规定类中的所有非抽象属性成员必须在对象创建的时候被初始化，但 val 一旦被初始化为就不可修改，在 Android 的 Activity 内很多变量都是在 onCreate 中初始化的。所以可以使用 **by lazy** 、 **lateinit** 和 **Delegates.notNull\<T>** 语法实现延迟初始化。
 
 #### by lazy
 
@@ -47,6 +47,15 @@ class Demo{
 
 lateinit 主要用于 var 声明的变量中，但它不能用于基础数据类型：Int、Long 等，需要使用 Integer 这种包装类代替。
 
+#### Delegates.notNull\<T>
+
+对于 var 声明的且还是基础数据类型的变量，一种解决方案是通过Delegates.notNull\<T>，利用委托的语法来实现。
+
+```
+var test by Delegates.notNull<Int>()
+var testLong by Delegated.notNull<Long>
+```
+
 另外可以利用代码来判断一个全局变量是否已经完成了初始化
 
 ```
@@ -59,8 +68,6 @@ class Demo{
     }
 }
 ```
-
-
 
 ## Kotlin 变量的类型系统
 
