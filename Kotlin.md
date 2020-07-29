@@ -316,7 +316,7 @@ val sum:(Int, Int) -> Int = {x, y -> x + y}
 2. 如果 Lambda 声明了参数部分类型并且返回值支持类型推导， Lambda 变量可以省略函数类型声明
 3. 如果 Lambda 声明了函数类型，那么 Lambda 的参数部分的类型就可以省略
 
-### 内联函数
+### 内联函数 inline
 
 Lambda 表达式会被编译成匿名类，每调用一次 Lambda 表达式，一个额外的类就会被创建，并且如果 Lambda 捕捉了某个变量，每次调用的时候还会创建一个对象，这会带来额外的开销。Kotlin 使用 **inline** 修饰符标记一个函数，在函数使用的时候，编译器并不会生成函数调用的代码，而是使用函数实现的真是代码替换每一次的函数调用。
 
@@ -377,9 +377,38 @@ public inline fun <T> T.apply(block: T.() -> Unit): T { block(); return this }
 
 调用 T 对象的 apply 函数，在函数范围内，可以任意调用该对象的方法，最后返回该对象。与 run 的区别是 run 返回的是最后一行。适用于对象初始化需要给其属性赋值的情况。
 
-#### noinline
+### inline/noinline/crossinline
 
-如果一个高阶函数接收了两个及以上的函数类型的参数，这时我们给函数加上 inline 关键字，那么 Kotlin 编译器会自动将所有引用的 Lambda 表达式进行内联。如果我们只想内联其中一个 Lambda 表达式，就需要将不需要内联的参数前使用 **noinline** 关键字进行修饰。
+简单总结：
+
+- inline：通过内联的方式（函数内容直接插入到调用处）优化代码层级和内存占用
+- noinline：在局部关闭 inline 这个优化
+- crossinline：在局部加强 inline 这个优化
+
+**inline** 不止可以内联自己内部代码，还可以内联自己的函数类型的参数，比如：
+
+```kotlin
+inline fun sayHi(action : () -> Unit) {
+	println("hi")
+	action()
+}
+```
+
+在调用时传入的 Lambda 表达式，在编译后会变成实际上 action() 代码，而不会创建一个对象。假如有一个 inline 关键字修饰的高阶函数接收了两个及以上的函数类型的参数， Kotlin 编译器会自动将所有的 Lambda 表达式进行内联。如果我们只想内联其中一个 Lambda 表达式，就要将不需要内联的参数前使用 **noinline** 关键字进行修饰。
+
+```kotlin
+inline fun sayHi(action1 : () -> Unit,noinline action2 : () -> Unit) {
+	action1()
+	println("hi")
+	action2()
+}
+```
+
+为什么会不想内联某个参数呢？因为一旦内联，这个参数就只是一个形式而已，在函数内部只能调用它，而不能对它有其他形式的访问（比如用它当做返回值）。
+
+Lambda 表达式有一个规则是：不允许使用 return 来返回结果，除非是个 inline 函数。如果在内联函数的 Lambda 表达式中使用了 return，结束的不是直接的外层函数，而是外层再外层的函数。
+
+这个规则间接引入另一个规则： inline 函数的参数中 Lambda 表达式不允许间接调用，为了解除不能间接调用的限制，要在参数前加上 **crossinline** 解除。但一旦加上这个关键字，Lambda 中就又不允许使用 return了。
 
 ## 类和接口
 
@@ -734,17 +763,59 @@ class Point(val x: Int, val y: Int){
 
 解构声明常用在对复杂对象的展开上，比如遍历 map 时，Map.Entry 的 conponent1 和 conponent2 分别对应它的键和值。
 
+## 委托
+
+### 类委托
+
+类委托的核心思想是将一个类的具体实现交给另一个类完成。如果没有 Kotlin 类委托的语法支持，完成委托模式的代码如下：
+
+```kotlin
+class MySet<T>(val helpSet: HashSet<T>) : Set<T> {
+    override val size: Int
+        get() = helpSet.size
+
+    override fun contains(element: T): Boolean {
+        return helpSet.contains(element)
+    }
+
+    override fun containsAll(elements: Collection<T>): Boolean {
+        helpSet.containsAll(elements)
+    }
+
+    override fun isEmpty(): Boolean {
+       return helpSet.isEmpty()
+    }
+
+    override fun iterator(): Iterator<T> {
+       return helpSet.iterator()
+    }
+}
+```
+
+MySet 中的所有方法都是通过辅助对象来实现的，但如果接口中需要实现的方法较多，如果都是自己实现，工作量会很大，所以 Kotlin 的委托语法是解决这个问题出现的。
+
+Kotlin 中使用关键字 by 来使用委托，上面的代码可以写为：
+
+```
+class MySet<T>(val helpSet: HashSet<T>) : Set<T> by helpSet {
+}
+```
+
+如果需要对某个方法进行重新实现，只需要单独重写那个方法就可以
+
 ### 委托属性
 
-委托属性的基本语法是这样的：
+委托属性的核心思想是将一个属性的具体实现交给另一个类实现，基本语法是这样的：
 
 ```kotlin
 class Foo{
     var p : Type by Delegate()
 }
+
+Delegate
 ```
 
-属性 p 将它的访问器逻辑委托给了另一个对象。这里时 Deltegate 类的一个实例。通过关键字 **by** 对其后的表达式求值来获取这个对象。关键字 **by** 可以用于任何符合属性委托约定规则的对象。编译器会创建一个隐藏的辅助属性，并使用委托对象的实例进行初始化：
+属性 p 将它的访问器逻辑委托给了另一个对象。这里时 Delegate 类的一个实例。通过关键字 **by** 对其后的表达式求值来获取这个对象。关键字 **by** 可以用于任何符合属性委托约定规则的对象。编译器会创建一个隐藏的辅助属性，并使用委托对象的实例进行初始化：
 
 ```kotlin
 class Foo{
@@ -756,6 +827,18 @@ class Foo{
 ```
 
 前面变量的章节提到的延迟初始化，有一个方式是「by lazy」。lazy 函数返回的是一个对象，该对象具有一个名为 getValue 且签名正确的方法，因此可以把它与 by 关键字一起使用来创建一个委托属性。lazy 的参数是一个 Lambda，可以调用它来初始化这个值。默认情况下，lazy 函数是线程安全的。
+
+```kotlin
+class LateInit<T>(val block: () -> T) {
+    var value: Any? = null
+    operator fun getValue(any: Any?, prop: KProperty<*>): T {
+        if (value == null) {
+            value = block
+        }
+        return value as T
+    }
+}
+```
 
 ## Kotlin 泛型
 
