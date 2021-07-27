@@ -487,12 +487,6 @@ public class ReportFragment extends Fragment {
     }
     ...省略onStop、onDestroy
     
-    private void dispatch(@NonNull Lifecycle.Event event) {
-        if (Build.VERSION.SDK_INT < 29) {
-            dispatch(getActivity(), event);
-        }
-    }
-    
     //在API 29及以上，使用的生命周期回调
     static class LifecycleCallbacks implements Application.ActivityLifecycleCallbacks {
         ...
@@ -523,7 +517,15 @@ public class ReportFragment extends Fragment {
 
 而ReportFragment的作用就是获取生命周期而已，因为fragment生命周期是依附Activity的。好处就是把这部分逻辑抽离出来，实现activity的无侵入。如果你对图片加载库Glide比较熟，就会知道它也是使用透明Fragment获取生命周期的。
 
+## 总结
 
+Lifecycle 的子类 LifecycleRegistry 是实际实现监控逻辑的文件，在 addObserver 方法创建了 ObserverWithState 类，并添加到 FastSafeIterableMap 类型的数据容器中缓存，供组件的生命周期发生变化时，寻找对应的方法并调用。
+
+当组件的生命周期发生变化时，通过调用 LifecycleRegistry 的 setCurrentState 或 handleLifecycleEvent，开始同步观察者最新生命周期状态 sync 方法。
+
+ObserverWithState 中包含了 LifecycleEventObserver 接口类型的实例，当组件的生命周期发生变化时，sync  方法会调用 ObserverWithState  的 dispatchEvent 方法，此方法会调用 LifecycleEventObserver 的 onStateChanged 方法。
+
+在 onStateChanged  中会通过解析注解寻找对应的方法，并调用
 
 文章参考学习：
 
