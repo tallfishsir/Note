@@ -199,9 +199,7 @@ Lifecycle 使用两种枚举跟踪组件的生命周期状态：
 
 两者之间的关系可以用下图总结：
 
-![image-20210724210938749](https://raw.githubusercontent.com/tallfishsir/image/main/img/20210724210945.png)
-
-![](https://p1-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/9d73ca5de1494aff973f7aa166282794~tplv-k3u1fbpfcp-watermark.image)
+![image-20210831222230669](https://pic.imgdb.cn/item/612e3b2544eaada7390e1a01.png)
 
 ### LifecycleRegistry 类
 
