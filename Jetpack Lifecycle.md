@@ -86,7 +86,7 @@ Presenter 实现 LifeObserver 接口，并注解自定义方法，然后在 Acti
 
 以上在 Activity 中调用 `getLifecycle()`就能获取 Lifecycle 实例，是因为 androidx 中的 Activity 和 Fragment 都已实现 LifecycleOwner 接口，如果有一个自定义类希望成为 LifecycleOwner，可以使用 LifecycleRegistry 类，它是 LifecycleOwner 接口的实现类。
 
-```
+```kotlin
 class CustomLifecycleActivity  :  LIfecycleOwner, Activity() {
 	
 	private val mLifecycleRegistry = LifecycleRegistry(this)
