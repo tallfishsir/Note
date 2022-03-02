@@ -163,6 +163,8 @@ final void attach(Context context, ActivityThread aThread,
 }
 ```
 
+在 Activity.attach() 方法中，创建了 PhoneWindow 对象并绑定了 WindowManager。
+
 ### 页面初始化
 
 Activity 的 onCreate 方法中会使用 setContentView 来渲染 DecorView 加载页面布局。
@@ -333,9 +335,30 @@ private void performDraw() {
 
 ### Instrumentation
 
+ActivityThread 的 mInstrumentation 对象是在启动进程过程的 handleBindApplication() 方法中被创建出来的。
+
+在启动页面过程的 performLaunchActivity() 方法中，通过 Activity.attach() 方法中传给 Activity。
+
+它完成了 Activity 对象的类加载器创建，启动页面，调用 Application/Activity 生命周期方法。
+
 ### ViewRootImpl
 
-### View.AttachInfo
+ViewRootImpl 是在通过 WindowManager 调用 addView() 添加 Window（View树）时创建的。然后被添加的 View 树的 parant 指向了 ViewRootImpl。后续完成与 WindowManagerService 的通信以及 View 体系的测量布局绘制流程。
 
 ### ContextImpl
 
+Context 体系的继承关系：
+
+- Context 是抽象类，提供了应用环境全局信息的接口
+- ContextWrapper 是上下文功能的封装类
+- ContextImpl 是上下文功能的实现类
+
+Applicaiton 和 Service 直接继承自 ContextWrapper 类，Activity 继承自 ContextThemeWrapper 类，因为 Activity 提供 UI 显示，需要有主题。应用的 Context 数量 = Activity 数量 + Service 数量 + 1（Application 数量）
+
+ContextWrapper 包含一个真正的 ContextImpl 的引用 mBase，然后就是 ContextImpl 的装饰者模式。
+
+Application 的 ContextImpl 对象是在 performLaunchActivity() 方法中创建的。
+
+Activity 的 ContextImpl 对象是在 Activity.attach() 方法中，由 Application 的 ContextImpl 对象传入的。
+
+[3分钟看懂Activity启动流程 - 简书 (jianshu.com)](https://www.jianshu.com/p/9ecea420eb52)
