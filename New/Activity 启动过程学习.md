@@ -253,8 +253,9 @@ public void requestLayout() {
 void scheduleTraversals() {
     if (!mTraversalScheduled) {
         mTraversalScheduled = true;
+        // mHandler 发送同步屏障信息，优先处理异步消息
         mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();
-        // mTraversalRunnable 是 Runnable 的子类，执行了 doTraversal() 方法
+        // mTraversalRunnable 是 Runnable 的子类，会往主线程的Handler发送一条异步消息
         mChoreographer.postCallback(
                 Choreographer.CALLBACK_TRAVERSAL, mTraversalRunnable, null);
         notifyRendererOfFramePending();
@@ -272,6 +273,12 @@ void doTraversal() {
 ```
 
 在 onResume 中 DecorView 被 WindowManager 添加到 PhoneWindow 中，显示在页面上。并创建了 ViewRootImpl 对象，将 DecorView 的 parent 指向 ViewRootImpl 。
+
+在 ViewRootImpl 构造函数中，初始化了 View.AttachInfo 对象和 ViewRootHandler 对象。
+
+View.AttachInfo 这个类存储一些 View attach 到 Window 时候的一些信息，并保存了 ViewRootHandler 对象引用。
+
+ViewRootHandler  类是 Handler 的子类，内部负责处理一些 View 布局绘制时的逻辑。
 
 ### 刷新页面
 

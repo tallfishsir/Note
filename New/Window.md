@@ -260,11 +260,15 @@ addView 的逻辑最后交给了创建的 ViewRootImpl 对象 setView 方法，�
 
 mWindowSession 是一个 IWindowSession 对象，IWindowSession 是一个 IBinder 接口，他的具体实现类在 WindowManagerService，通过这个 mWindowSession 就可以直接调用 WMS 的方法进行跨进程通信。
 
+mAttachInfo 存储一些 View attach 到 Window 时候的一些信息，并保存了 ViewRootHandler 对象引用。ViewRootHandler  类是 Handler 的子类，内部负责处理一些 View 布局绘制时的逻辑。
+
 ```java
 public ViewRootImpl(Context context, Display display) {
-      ...
-      mWindowSession = WindowManagerGlobal.getWindowSession();
-      ...
+	...
+	mWindowSession = WindowManagerGlobal.getWindowSession();
+	mAttachInfo = new View.AttachInfo(mWindowSession, mWindow, display, this, mHandler, this,
+		context);
+	...
 }
 
 // WindowManagerGlobal.java
