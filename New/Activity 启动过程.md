@@ -1,4 +1,4 @@
-#  Activity 启动过程学习 
+#  Activity 启动过程
 
 ## 系统启动流程
 

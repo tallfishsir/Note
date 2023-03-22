@@ -54,28 +54,37 @@ public View inflate(@LayoutRes int resource, @Nullable ViewGroup root, boolean a
     }
 }
 
-//
 public View inflate(XmlPullParser parser, @Nullable ViewGroup root, boolean attachToRoot) {
     synchronized (mConstructorArgs) {
         final Context inflaterContext = mContext;
         final AttributeSet attrs = Xml.asAttributeSet(parser);
         View result = root;
         try {
-            //根据解析结果parse，创建View对象
-            final View temp = createViewFromTag(root, name, inflaterContext, attrs);
-            ViewGroup.LayoutParams params = null;
-            if (root != null) {
-            	params = root.generateLayoutParams(attrs);
-            	if (!attachToRoot) {
-            		temp.setLayoutParams(params);
-            	}
-            }
-            //循环遍历子View的加载过程
-            rInflateChildren(parser, temp, attrs, true);
-            if (root != null && attachToRoot) {
-                //将创建的View对象，添加作为root的子view
-            	root.addView(temp, params);
-            }
+            if (TAG_MERGE.equals(name)) {
+                 //merge标签只能是布局文件的根节点
+              	 if (root == null || !attachToRoot) {
+                      throw new InflateException("<merge /> can be used only with a valid "
+                + "ViewGroup root and attachToRoot=true");
+                 }
+				//merge标签，循环遍历子View的加载过程
+				rInflate(parser, root, inflaterContext, attrs, false);
+			} else {
+				//根据解析结果parse，创建View对象
+				final View temp = createViewFromTag(root, name, inflaterContext, attrs);
+				ViewGroup.LayoutParams params = null;
+				if (root != null) {
+					params = root.generateLayoutParams(attrs);
+					if (!attachToRoot) {
+						temp.setLayoutParams(params);
+					}
+				}
+				//循环遍历子View的加载过程
+				rInflateChildren(parser, temp, attrs, true);
+				if (root != null && attachToRoot) {
+					//将创建的View对象，添加作为root的子view
+					root.addView(temp, params);
+				}
+			}
         }
         return result;
     }
@@ -482,13 +491,98 @@ private Callback mHandlerCallback = new Callback() {
 4. 同时缓存队列默认 10 的大小限制如果超过了10个则会导致主线程的等待
 5. 使用单线程来做全部的 inflate 工作，如果一个界面中 layout 很多不一定能满足需求
 
-### merge/ViewStub
+### ViewStub/include-merge
 
-#### merge
+#### include-merge
+
+include-merge 标签用于防止在引用布局文件时产生多余的布局嵌套。在 LayoutInflater.inflate 中可以看到，面对 merge 标签的 xml 数据，会调用 rInflate 来解析子 View。
+
+```xml
+activity_layout.xml
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000">
+
+    <include layout="@layout/titlebar_layout"></include>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:text="这是内容区域"
+        android:gravity="center"
+        android:textSize="25sp"
+        android:textColor="#ffffff"/>
+</LinearLayout>
+
+titlebar_layout.xml
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+    <Button
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:text="顶部Button" />
+
+    <Button
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:text="底部Button" />
+</merge>
+```
+
+使用 include 标签需要注意：
+
+- include 标签的 layout_* 属性会替换掉被 include 视图的根节点的对应属性
+- include 标签的 id 属性会替换调被 include 视图的根节点 id
+- 一个布局文件中支持 include 多个视图，这样
+
+使用 merge 标签需要注意：
+
+- merge 必须是布局文件的根节点
+
+- merge 标签不是 View，当使用 Layout Inflater.inflate 渲染时，第二个参数必须指定一个父容器，且第三个参数必须是 true
+
+- merge 标签不是 View，在 xml 中对其设置的所有属性都是无效的
+
+- 自定义View 继承 ViewGroup，自定义 View 的布局文件根节点设置成 merge，可以减少节点
+
+  ```xml
+  public class MergeLayout extends LinearLayout {
+      public MergeLayout(Context context) {
+          super(context);
+          LayoutInflater.from(context).inflate(R.layout.merge_activity, this, true);
+      }
+  }
+  
+  <?xml version="1.0" encoding="utf-8"?>
+  <merge xmlns:android="http://schemas.android.com/apk/res/android" >
+      <TextView
+          android:layout_width="match_parent"
+          android:layout_height="0dp"
+          android:layout_weight="1.0"
+          android:background="#000000"
+          android:gravity="center"
+          android:text="第一个TextView"
+          android:textColor="#ffffff" />
+  
+      <TextView
+          android:layout_width="match_parent"
+          android:layout_height="0dp"
+          android:layout_weight="1.0"
+          android:background="#ffffff"
+          android:gravity="center"
+          android:text="第一个TextView"
+          android:textColor="#000000" />
+  </merge>
+  ```
 
 #### ViewStub
 
-ViewStub 是一个没有大小，不占布局位置且不可见的 View，可以用来懒加载布局。当 ViewStub 可见时或被 inflate() 时，布局会被加载，在加载完成后，ViewStub 会被新的布局替换。。
+ViewStub 是一个没有大小，不占布局位置且不可见的 View，可以用来懒加载布局。当 ViewStub 可见时或被 inflate() 时，布局会被加载，在加载完成后，ViewStub 会被新的布局替换。
 
 ```java
 <ViewStub
@@ -579,14 +673,11 @@ public View inflate() {
             } else {
                 parent.addView(view, index);
             }
-
             // mInflatedViewRef 就是在这里对 view 进行了弱引用
             mInflatedViewRef = new WeakReference<View>(view);
-
             if (mInflateListener != null) {
                 mInflateListener.onInflate(this, view);
             }
-
             return view;
         } else {
             throw new IllegalArgumentException("ViewStub must have a valid layoutResource");
@@ -597,7 +688,7 @@ public View inflate() {
 }
 ```
 
-## addView/removeView。
+## addView/removeView
 
 ### addView
 
@@ -1007,6 +1098,10 @@ public void handleMessage(Message msg) {
 [Android布局优化（三）使用AsyncLayoutInflater异步加载布局 - 简书 (jianshu.com)](https://www.jianshu.com/p/8548db25a475)
 
 [Android中自定义样式与View的构造函数中的第三个参数defStyle的意义 - AngelDevil - 博客园 (cnblogs.com)](https://www.cnblogs.com/angeldevil/p/3479431.html)
+
+[ViewStub你肯定听过，但是这些细节了解吗？ (qq.com)](https://mp.weixin.qq.com/s?__biz=MzAxMTI4MTkwNQ==&mid=2650829913&idx=1&sn=4f6ed4bc4e232a1313170ce324dc50ca&chksm=80b7a0c7b7c029d19ef094e85b2d6c95c04859272b988af1c3b92b75b083cc923d47e6a455f1)
+
+[Android 布局优化之include与merge - 简书 (jianshu.com)](https://www.jianshu.com/p/5f6f1f12fd07)
 
 [addView方法分析 - 简书 (jianshu.com)](https://www.jianshu.com/p/ce2d6baabb36)
 
