@@ -237,6 +237,8 @@ WindowManagerGlobal 中有三个 List，每次 addView 时创建的对象都会�
 public void setView(View view, WindowManager.LayoutParams attrs, View panelParentView) {
     synchronized (this) {
         ...
+        requestLayout();
+        ...
         try {
             mOrigWindowType = mWindowAttributes.type;
             mAttachInfo.mRecomputeGlobalAttributes = true;

@@ -1,6 +1,22 @@
 #  Activity 启动过程学习 
 
-## 跳转页面代码分析
+## 系统启动流程
+
+当按下电源开机后，ROM 中的 BootLoader 会被加载到内存中，Bootloader 初始化软硬件环境后，启动内核。
+
+Linux 内核启动过程中会创建 init 进程，init 进程是用户空间的第一个进程 。它创建和挂载启动所需要的文件目录，然后初始化并启动属性服务，最后解析 init.rc 配置文件，启动 zygote 进程。
+
+Zygote 进程启动了 JVM 虚拟机，然后创建一个类加载器 PathClassLoader 用于后续加载 Java 类，最后调用 forkSystemServer 函数 fork 出 system_server 进程。
+
+system_server 进程承载了 framework 层的核心业务，启动过程中启动了 Binder 线程池，创建了 SystemServiceManager，用于对系统服务进行创建、启动和生命周期管理，最后启动了引导服务、核心服务、其他服务，比如 AMS、WMS、PMS 等。
+
+AMS 的启动过程 systemReady() 中，会通过 ActivityTaskManagerService 获取控制器，启动 Launcher。
+
+![image-20221019220055901](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\image-20221019220055901.png)
+
+## 页面跳转代码分析
+
+![](https://upload-images.jianshu.io/upload_images/1869462-882b8e0470adf85a.jpg)
 
 ### 开始跳转
 
@@ -77,12 +93,115 @@ checkStartActivityResult 方法用于检查页面跳转结果的检验，通常�
 
 ### 启动进程
 
-AMS 检查下一个 Activity 所属的进程是否存在，如果不存在会创建并启动对应的进程，然后调用 ActivityThread 的 handleBindApplication 创建目标进程的 Application 对象
+AMS 检查下一个 Activity 所属的进程是否存在，如果不存在就会通过调用 startProcessLocked 函数向 Zygote 进程发送请求创建对应进程。
+
+```java
+private final void startProcessLocked(ProcessRecord app, String hostingType, String hostingNameStr, String abiOverride, String entryPoint, String[] entryPointArgs) {
+    int uid = app.uid;//获取应用进程的id
+    ...
+    if (entryPoint == null) entryPoint = "android.app.ActivityThread";
+    //应用程序进程是通过Zygote进程fock产生的
+    Process.ProcessStartResult startResult = Process.start(entryPoint,
+                  app.processName, uid, uid, gids, debugFlags, mountExternal,
+                  app.info.targetSdkVersion, app.info.seinfo, requiredAbi,
+                  instructionSet, app.info.dataDir, entryPointArgs);
+}
+
+//RuntimeInit.java
+private static void applicationInit(int targetSdkVersion, String[] argv, ClassLoader classLoader) throws ZygoteInit.MethodAndArgsCaller {
+    ...
+    invokeStaticMain(args.startClass, args.startArgs, classLoader);//1
+}
+
+//RuntimeInit.java
+private static void invokeStaticMain(String className, String[] argv, ClassLoader classLoader) throws ZygoteInit.MethodAndArgsCaller {
+    Class<?> cl;
+    try {
+        cl = Class.forName(className, true, classLoader);//android.app.ActivityThread类
+    } catch (ClassNotFoundException ex) {
+    }
+    Method m;
+    try {
+        m = cl.getMethod("main", new Class[] { String[].class });
+    } catch (NoSuchMethodException ex) {
+    }
+    ...
+    throw new ZygoteInit.MethodAndArgsCaller(m, argv);//3
+}
+```
+
+创建应用进程的过程中，会 ActivityThread 的 main 方法。
+
+```java
+final ApplicationThread mAppThread = new ApplicationThread();
+final H mH = new H();
+
+public static void main(String[] args) {
+    ...
+    //创建当前主线程的Looper对象
+    Looper.prepareMainLooper();
+    ...
+    //创建ActivityThread对象
+    ActivityThread thread = new ActivityThread();
+    //发送创建Application消息
+    thread.attach(false, startSeq);
+    if (sMainThreadHandler == null) {
+        //Handler类型的H对象
+        sMainThreadHandler = thread.getHandler();
+    }
+    ...
+    //开启looper循环
+    Looper.loop();
+}
+
+private void attach(boolean system, long startSeq) {
+    ...
+    //获得ActivityManagerService实例
+    final IActivityManager mgr = ActivityManager.getService();
+    try {
+        //ApplicationThread作为IApplicationThread的一个实例与AMS绑定
+        //承担起最后发送Activity生命周期、及其它一些消息的任务
+        mgr.attachApplication(mAppThread);
+    } catch (RemoteException ex) {
+    }
+    ...
+}
+
+//ActivityManagerService.java
+public void attachApplication(IApplicationThread app){
+  ...
+  //在AMS中调用ApplicationThread的bindApplication方法初始化Application
+  thread.bindApplication();
+  ...
+}
+
+//ApplicationThread
+public final void bindApplication(String processName, 
+    ApplicationInfo appInfo,...){
+    ...
+    sendMessage(H.BIND_APPLICATION, data);
+}
+
+//在 H 对象的中处理Message
+public void handleMessage(Message msg) {
+    ...
+    switch (msg.what) {
+        case BIND_APPLICATION:
+            AppBindData data = (AppBindData)msg.obj;
+            handleBindApplication(data);
+            break;
+    }
+}
+```
+
+ActivityThread 的 handleBindApplication 创建目标进程的 Application 对象。
 
 ```java
 private void handleBindApplication(AppBindData data) {
     ...
-    mInstrumentation = new Instrumentation();
+    //通过反射初始化Instrumentation对象
+    mInstrumentation = (Instrumentation)
+                    cl.loadClass(data.instrumentationName.getClassName()).newInstance();
     Application app = data.info.makeApplication(data.restrictedBackupMode, null);
 }
 
@@ -90,9 +209,12 @@ public Application makeApplication(boolean forceDefaultAppClass,
         Instrumentation instrumentation) {
     String appClass = mApplicationInfo.className;
     final java.lang.ClassLoader cl = getClassLoader();
+    //初始化ContextImpl对象
     ContextImpl appContext = ContextImpl.createAppContext(mActivityThread, this);
+    //创建Application实例
     app = mActivityThread.mInstrumentation.newApplication(cl, appClass, appContext);
     ...
+    //调用Application的onCreate()方法
     instrumentation.callApplicationOnCreate(app);
 }
 ```
@@ -177,12 +299,15 @@ public void setContentView(@LayoutRes int layoutResID) {
 
 // PhoneWindow.java
 public void setContentView(int layoutResID) {
-    // 创建 DecorView
-    installDecor();
-    // ID_ANDROID_CONTENT 的布局作为 Activity 的布局父布局
+    if (mContentParent == null) {
+        //初始化DecorView和mContentParent
+    	installDecor();
+	} else if (!hasFeature(FEATURE_CONTENT_TRANSITIONS)) {
+	    mContentParent.removeAllViews();
+	}
+    ...
+    //加载资源文件，创建view树装载到mContentParent
     mLayoutInflater.inflate(layoutResID, mContentParent);
-    // 利用在 Activity.attach 方法中设置的回调通知 Activity
-    getCallback().onContentChanged(); 
 }
 
 private void installDecor() {
@@ -340,19 +465,15 @@ private void performDraw() {
 
 ## Activity 跳转流程相关类和对象
 
-### Instrumentation
+### Looper
 
-ActivityThread 的 mInstrumentation 对象是在启动进程过程的 handleBindApplication() 方法中被创建出来的。
-
-在启动页面过程的 performLaunchActivity() 方法中，通过 Activity.attach() 方法中传给 Activity。
-
-它完成了 Activity 对象的类加载器创建，启动页面，调用 Application/Activity 生命周期方法。
+见 Handler.md
 
 ### ViewRootImpl
 
-ViewRootImpl 是在通过 WindowManager 调用 addView() 添加 Window（View树）时创建的。然后被添加的 View 树的 parant 指向了 ViewRootImpl。后续完成与 WindowManagerService 的通信以及 View 体系的测量布局绘制流程。
+见 Window.md
 
-### ContextImpl
+### Context
 
 Context 体系的继承关系：
 
@@ -368,4 +489,8 @@ Application 的 ContextImpl 对象是在 performLaunchActivity() 方法中创建
 
 Activity 的 ContextImpl 对象是在 Activity.attach() 方法中，由 Application 的 ContextImpl 对象传入的。
 
+
+
 [3分钟看懂Activity启动流程 - 简书 (jianshu.com)](https://www.jianshu.com/p/9ecea420eb52)
+
+[Android深入理解Context（一）Context关联类和Application Context创建过程 | BATcoder - 刘望舒 (liuwangshu.cn)](http://liuwangshu.cn/framework/context/1-application-context.html)

@@ -1,19 +1,236 @@
 # View 刷新流程
 
+## Android 屏幕刷新
+
+### 三重缓冲和 VSync（垂直同步）
+
+CPU：主要用于计算数据，在 Android 中主要进行 Surface 的计算过程，起着生产者的作用。
+
+GPU：主要用于画面的渲染，将 CPU 计算好的 Surface 数据合成到 buffer 中，让显示器进行读取，起着消费者的作用。
+
+帧率：GPU 在1秒内可以渲染多少帧到 buffer 中，单位是 fps。
+
+屏幕刷新率：屏幕在1秒内从 buffer 中取数据的次数，单位为Hz。
+
+![image-20230320222207964](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\image-20230320222207964.png)
+
+画面撕裂的问题，本质上是帧率和屏幕刷新率不一致导致的，在 Android 4.1 之前，使用了双缓冲来解决画面撕裂的问题：
+
+- GPU 写入的缓存是：Back Buffer
+- 屏幕刷新率使用的缓存是：Frame Buffer
+
+当屏幕刷新时，Frame Buffer 不会发生变化，GPU 持续写入 Back Buffer，然后当屏幕刷新完毕，下一帧刷新之前，通过交换 Buffer 实现帧数据的切换，这个时间点硬件屏幕会发出一个脉冲信号，这个信号就是 VSync 信号。在没有 VSync 信号之前，每次 CPU 计算数据的过程都会等待 GPU 将上一个 Surface 数据渲染后才会进行，这就导致当有一次 GPU 合成过程耗时太多，就会影响接下来的帧率，为了进一步优化渲染性能，系统在收到 VSyns 信号后，会马上进行 CPU 的计算和 GPU 的 buffer 写入。 这样就可以让 CPU 和 GPU  有个完整的16.6ms处理过程。最大限度的减少 jank 的发生。
+
+![image-20230320223953663](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\image-20230320223953663.png)
+
+如果主线程做了一些相对复杂耗时逻辑，导致 CPU 和 GPU 的处理时间超过16.6ms，由于此时 back buffer 写入的是B帧数据，在交换 buffer 前不能被覆盖，而 frame buffer 被 Display 用来做刷新用，所以在B帧写入 back buffer完成到下一个 VSync 信号到来之前两个 buffer 都被占用了，CPU 无法继续绘制，这段时间就会被空着， 于是又出现了三重缓存。在第一个 VSync 信号来时，虽然 back buffer 以及 frame buffer 都被占用了，CPU 此时会启用第三个 Buffer，避免了 CPU 的空闲状态。
+
+![image-20230320224413617](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\image-20230320224413617.png)
+
+### Choreographer
+
+上一节提到 VSync 的最重要的两个功能：
+
+- 标记前后台 Buffer 的切换时机
+- CPU 和 GPU 重新开始计算
+
+在 Android 的源码层面是通过 Choreographer 来实现的。[Window](Window.md) 的最后提到 ViewRootImpl 通过 setView() 将 View 添加到 Window 中，其中调用了 requestLayout() 。
+
+```java
+ViewRootImpl.java
+public void requestLayout() {
+    if (!mHandlingLayoutInLayoutRequest) {
+        checkThread();
+        mLayoutRequested = true;
+        scheduleTraversals();
+    }
+}
+
+void scheduleTraversals() {
+    //mTraversalScheduled保证不会重复执行，在doTraversal()中重置为false
+    if (!mTraversalScheduled) {
+        mTraversalScheduled = true;
+        //Handler发送同步屏障消息，保证异步绘制消息优先执行
+        mTraversalBarrier = mHandler.getLooper().getQueue().postSyncBarrier();
+        //mChoreographer发送一个Runnable，View的measure、layout、draw等流程都在doTraversal中
+        mChoreographer.postCallback(
+                Choreographer.CALLBACK_TRAVERSAL, mTraversalRunnable, null);
+        notifyRendererOfFramePending();
+        pokeDrawLockIfNeeded();
+    }
+}
+
+final class TraversalRunnable implements Runnable {
+    @Override
+    public void run() {
+        doTraversal();
+    }
+}
+final TraversalRunnable mTraversalRunnable = new TraversalRunnable();
+
+void doTraversal() {
+    //在scheduleTraversals()中设为true
+    if (mTraversalScheduled) {
+        mTraversalScheduled = false;
+        //Handler移除同步屏障消息
+        mHandler.getLooper().getQueue().removeSyncBarrier(mTraversalBarrier);
+        //开启View的测量布局绘制流程
+        performTraversals();
+    }
+}
+```
+
+接下来就要分析 mChoreographer 是如何发送一个 Choreographer.CALLBACK_TRAVERSAL 任务，来在 VSync 信号来临的时候启动 doTraversal()，开启 View 的测量布局绘制流程的。
+
+```java
+Choreographer.java
+public void postCallback(int callbackType, Runnable action, Object token) {
+    ...
+    postCallbackDelayedInternal(callbackType, action, token, 0);
+}
+
+private void postCallbackDelayedInternal(int callbackType,
+        Object action, Object token, long delayMillis) {
+    synchronized (mLock) {
+        final long now = SystemClock.uptimeMillis();
+        final long dueTime = now + delayMillis;
+        ////将Runnable封装为CallbackRecord对象后，存到mCallbackQueues数组中
+        mCallbackQueues[callbackType].addCallbackLocked(dueTime, action, token);
+        if (dueTime <= now) {
+            scheduleFrameLocked(now);
+        } else {
+            Message msg = mHandler.obtainMessage(MSG_DO_SCHEDULE_CALLBACK, action);
+            msg.arg1 = callbackType;
+            msg.setAsynchronous(true);
+            mHandler.sendMessageAtTime(msg, dueTime);
+        }
+    }
+}
+
+private void scheduleFrameLocked(long now) {
+    if (!mFrameScheduled) {
+        mFrameScheduled = true;
+        if (USE_VSYNC) {
+            //使用了VSYNC信号，如果是在主线程上，则直接调用scheduleVsyncLocked
+            if (isRunningOnLooperThreadLocked()) {
+                scheduleVsyncLocked();
+            } else {
+                Message msg = mHandler.obtainMessage(MSG_DO_SCHEDULE_VSYNC);
+                msg.setAsynchronous(true);
+                mHandler.sendMessageAtFrontOfQueue(msg);
+            }
+        }
+        ...
+    }
+}
+
+//对于延时操作或者子线程，进行处理，最终都会回归总流程
+private final class FrameHandler extends Handler {
+    public FrameHandler(Looper looper) {
+        super(looper);
+    }
+    @Override
+    public void handleMessage(Message msg) {
+        switch (msg.what) {
+            case MSG_DO_FRAME:
+                doFrame(System.nanoTime(), 0, new DisplayEventReceiver.VsyncEventData());
+                break;
+            case MSG_DO_SCHEDULE_VSYNC:
+                doScheduleVsync();
+                break;
+            case MSG_DO_SCHEDULE_CALLBACK:
+                doScheduleCallback(msg.arg1);
+                break;
+        }
+    }
+}
+
+private void scheduleVsyncLocked() {
+    ...
+    //mDisplayEventReceiver是在Choreographer的构造函数中创建的
+    //是FrameDisplayEventReceiver的类对象
+    mDisplayEventReceiver.scheduleVsync();
+}
+
+public void scheduleVsync() {
+    //native层注册VSync信号监听，当监听后会调用onVsync回调
+    nativeScheduleVsync(mReceiverPtr);
+}
+
+private final class FrameDisplayEventReceiver extends DisplayEventReceiver
+        implements Runnable {
+    @Override
+    public void onVsync(long timestampNanos, long physicalDisplayId, int frame,
+            VsyncEventData vsyncEventData) {
+        try {
+            //监听到VSync信号，发送一个异步消息，因为有同步屏障消息的存在，这个异步消息优先执行
+            Message msg = Message.obtain(mHandler, this);
+            msg.setAsynchronous(true);
+            mHandler.sendMessageAtTime(msg, timestampNanos / TimeUtils.NANOS_PER_MS);
+        } finally {
+            Trace.traceEnd(Trace.TRACE_TAG_VIEW);
+        }
+    }
+    @Override
+    public void run() {
+        mHavePendingVsync = false;
+        //Message的Runnable，指定doFrame方法
+        doFrame(mTimestampNanos, mFrame, mLastVsyncEventData);
+    }
+}
+
+void doFrame(long frameTimeNanos, int frame) {
+    ...
+    try {
+        mFrameInfo.markInputHandlingStart();
+                    //处理输入事件
+        doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);
+
+        mFrameInfo.markAnimationsStart();
+                    //处理动画事件
+        doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);
+
+        mFrameInfo.markPerformTraversalsStart();
+                    //处理CALLBACK_TRAVERSAL，三大绘制流程
+        doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);
+    } 
+    ...
+}
+
+void doCallbacks(int callbackType, long frameTimeNanos) {
+    //在postCallbackDelayedInternal中封装的CallbackRecord对象，依次执行Runnable
+    //最终调会到ViewRootImpl.performTraversals()
+    for (CallbackRecord c = callbacks; c != null; c = c.next) {
+        c.run(frameTimeNanos);
+    }
+}
+```
+
+## View 测量布局绘制
+
+### performTraversals
+
 ViewRootImpl 的 performTraversals 方法中开始执行 View 体系的测量布局绘制流程：
 
 ```java
+//ViewRootImpl.java
 private void performTraversals() {
-    // DecorView 赋值为局部变量 host
     final View host = mView;
+    if (mFirst) {
+        //回调view的onAttachToWindow()
+        //将View所有的HandlerAction都已经交给 ViewRootImpl 去处理
+    	host.dispatchAttachedToWindow(mAttachInfo, 0);
+    }
+    //执行ViewRootImpl.HandlerAction
+    getRunQueue().executeActions(mAttachInfo.mHandler);
     ...
-    // 执行 measure 逻辑
+    // 执行 measure 逻辑（mStopped表示Activity是否处于stopped状态）
     boolean layoutRequested = mLayoutRequested && (!mStopped || mReportNextDraw);
     if (layoutRequested) {
         windowSizeMayChange |= measureHierarchy(host, lp, res, desiredWindowWidth, desiredWindowHeight);
     }
     ...
-    // 执行 layout 逻辑
+    // 执行 layout 逻辑（mStopped表示Activity是否处于stopped状态）
     final boolean didLayout = layoutRequested && (!mStopped || mReportNextDraw);
     if (didLayout) {
         performLayout(lp, mWidth, mHeight);
@@ -31,38 +248,96 @@ private void performTraversals() {
 }
 ```
 
-在整个 View 的刷新流程中，有多个标志位是通过二进制位运算来完成的：
+在 View.dispatchAttachedToWindow() 中会完成 View.mAttachInfo 的赋值及 View.onAttachToWindow() 的回调。
 
 ```java
-private static final int FLAG = 1;  // 实际值是：0001 = 1
-private static final int FLAG_1 = FLAG << 1; // 实际值是：0010 = 2
-private static final int FLAG_2 = FLAG << 2; // 实际值是：0100 = 4
-private static final int FLAG_3 = FLAG << 3; // 实际值是：1000 = 8
+//View.java
+void dispatchAttachedToWindow(AttachInfo info, int visibility) {
+    mAttachInfo = info;
+    if (mRunQueue != null) {
+        //所有的HandlerAction都已经交给 ViewRootImpl 去处理
+    	mRunQueue.executeActions(info.mHandler);
+    	mRunQueue = null;
+	}
+    onAttachedToWindow();
+}
+
+//View.java
+public boolean post(Runnable action) {
+    final AttachInfo attachInfo = mAttachInfo;
+    //在View.dispatchAttachedToWindow时才会给mAttachInfo赋值
+    if (attachInfo != null) {
+        return attachInfo.mHandler.post(action);
+    }
+    //HandlerActionQueue内包含一个HandlerAction数组，用于存放action
+    getRunQueue().post(action);
+    return true;
+}
+
 ```
 
-当需要给标志位增加某个标志，就让 mFlag 与 标志位做或运算
+注意到在 ViewRootImpl 和 View 中都有 getQueue().executeActions() 相关操作，这是基于 Handler 的延迟操作。根据 [Window](Window.md) 中提到的 View 的测量是发生在 onResume 中的，所以在 onCreate 中 View 可以通过 post(Runnable) 来获取宽高信息。
 
+```java
+public class HandlerActionQueue {
+    private HandlerAction[] mActions;
+    private int mCount;
+    // 这个就是我们在外边调用的 post 方法，最终会调用到 postDelayed 方法
+    public void post(Runnable action) {
+        postDelayed(action, 0);
+    }
+    // 将传入的 Runnable 对象存入数组中，等待调用
+    public void postDelayed(Runnable action, long delayMillis) {
+        final HandlerAction handlerAction = new HandlerAction(action, delayMillis);
+
+        synchronized (this) {
+            if (mActions == null) {
+                mActions = new HandlerAction[4];
+            }
+            mActions = GrowingArrayUtils.append(mActions, mCount, handlerAction);
+            mCount++;
+        }
+    }
+    // 这里才是真的执行方法
+    public void executeActions(Handler handler) {
+        synchronized (this) {
+            final HandlerAction[] actions = mActions;
+            for (int i = 0, count = mCount; i < count; i++) {
+                final HandlerAction handlerAction = actions[i];
+                handler.postDelayed(handlerAction.action, handlerAction.delay);
+            }
+            mActions = null;
+            mCount = 0;
+        }
+    }
+}
+
+//ViewRootImpl.java
+static HandlerActionQueue getRunQueue() {
+    // sRunQueues 是 ThreadLocal<HandlerActionQueue> 对象
+    HandlerActionQueue rq = sRunQueues.get();
+    if (rq != null) {
+        return rq;
+    }
+    rq = new HandlerActionQueue();
+    sRunQueues.set(rq);
+    return rq;
+}
 ```
-mFlag |= FLAG_1
-```
 
-当需要给标志位去除某个标志，就让 mFlag 与标志位取反做与运算
+总结一下：
 
-```
-mFlag &= ~FLAG_1
-```
+- View.post 方法会为当前 View 对象初始化一个 HandlerActionQueue ，并将 Runnable 入队存储；
 
-当需要判断标志位是否含有某个标志位，就让 mFlag 与标志位做与运算后比较
+- 等在 ViewRootImpl.performTraversals 中递归调用到 View.dispatchAttachedToWindow 时，会将 ViewRootImpl 的 Handler 对象传下来，然后通过这个 Handler 将最初的 Runnable 发送到 UI 线程（消息队列中）等待执行，并将 View 的 HandlerActionQueue 对象置空，方便回收；
 
-```
-if（(mFlag & FLAG_1) == FLAG_1）
-```
+- ViewRootImpl.performTraversals 继续执行，才会为 UI 线程首次初始化 HandlerActionQueue 对象，并通过 ThreadLocal 进行存储，然后执行 executeActions 将 Runnable 放入 Handler 队列中
 
-## measure
+### Measure 流程
 
-measure 过程完成了测量逻辑，确定了 View 的宽和高。
+根据 Window 的大小，xml 布局文件以及 View 的相关属性的设置，来计算出每个 View 的大小尺寸。完成后会确定的 View 的 mMeasuredWidth 和 mMeasuredHeight 属性。
 
-### MeasureSpec
+#### MeasureSpec
 
 MeasureSpec 是 View 测量过程中体现测量值的一个静态类，它代表一个 32 位 int 值，高 2 位代表 SpecMode，低 30 位代表 SpecSize。SpecMode 指的是测量模式，SpecSize 指的是某种测量模式下的大小。
 
@@ -86,9 +361,7 @@ public static class MeasureSpec {
     }
     
     // 解析测量模式
-    @MeasureSpecMode
     public static int getMode(int measureSpec) {
-        //noinspection ResourceType
         return (measureSpec & MODE_MASK);
     }
     
@@ -105,13 +378,11 @@ SpecMode 的三个值，代表着父 View 对子 View 测量时的要求：
 - EXACTLY：父 View 已经计算出子 View 的确定的大小
 - AT_MOST：父 View 最多允许子 View 的大小
 
-### ViewRootImpl measureHierarchy
+#### ViewRootImpl.measureHierarchy()
 
-在 ViewRootImpl 的 performTraversals 方法中调用 measureHierarchy 开启了测量流程。并在不同的条件下，利用 getRootMeasureSpec() 方法完成了整个 View 测量过程中顶层 MeasureSpec 对象的赋值。
+ViewRootImpl.measureHierarchy 开启了测量流程，通过 getRootMeasureSpec() 获取 Window 的大小来设置顶层 MeasureSpec。然后将顶层 MeasureSpec 传入 View.measure 流程。
 
 ```java
-// desiredWindowWidth/desiredWindowHeight是Window外部的限制宽高，可能是屏幕宽度也可能是Window宽高
-// lp是Window自身布局对宽高的要求
 private boolean measureHierarchy(final View host, final WindowManager.LayoutParams lp,
         final Resources res, final int desiredWindowWidth, final int desiredWindowHeight) {
     int childWidthMeasureSpec;
@@ -125,6 +396,9 @@ private boolean measureHierarchy(final View host, final WindowManager.LayoutPara
         }
         
         if (baseSize != 0 && desiredWindowWidth > baseSize) {
+            //getRootMeasureSpec/getChildMeasureSpec 是相同的逻辑
+            //baseSize代表Window外部的限制宽高
+            //lp是Window自身布局对宽高的要求
             childWidthMeasureSpec = getRootMeasureSpec(baseSize, lp.width);
             childHeightMeasureSpec = getRootMeasureSpec(desiredWindowHeight, lp.height);
             performMeasure(childWidthMeasureSpec, childHeightMeasureSpec);
@@ -152,19 +426,26 @@ private boolean measureHierarchy(final View host, final WindowManager.LayoutPara
     return windowSizeMayChange;
 }
 
+private void performMeasure(int childWidthMeasureSpec, int childHeightMeasureSpec) {
+    if (mView == null) {
+        return;
+    }
+    try {
+        mView.measure(childWidthMeasureSpec, childHeightMeasureSpec);
+    } finally {
+    }
+}
+
 private static int getRootMeasureSpec(int windowSize, int rootDimension) {
     int measureSpec;
     switch (rootDimension) {
     case ViewGroup.LayoutParams.MATCH_PARENT:
-        // Window can't resize. Force root view to be windowSize.
         measureSpec = MeasureSpec.makeMeasureSpec(windowSize, MeasureSpec.EXACTLY);
         break;
     case ViewGroup.LayoutParams.WRAP_CONTENT:
-        // Window can resize. Set max size for root view.
         measureSpec = MeasureSpec.makeMeasureSpec(windowSize, MeasureSpec.AT_MOST);
         break;
     default:
-        // Window wants to be an exact size. Force root view to be that size.
         measureSpec = MeasureSpec.makeMeasureSpec(rootDimension, MeasureSpec.EXACTLY);
         break;
     }
@@ -172,11 +453,13 @@ private static int getRootMeasureSpec(int windowSize, int rootDimension) {
 }
 ```
 
-在 performMeasure 方法中，会将顶层 MeasureSpec 对象传给 ViewRootImpl 的 mView 对象，开启 View 的测量流程。
+#### View.meaure()
 
-### View 默认 onMeasure
+View.measure 流程中，会有以下几个关键的变量或标识赋值：
 
-在 ViewRootImpl 的 measureHierarchy 方法中，调用 View 的 measure 方法开启测量。
+- forceLayout 变量根据 PFLAG_FORCE_LAYOUT 标识判断是否是强制重新 measure
+- needsLayout 变量根据 MeasureSpec 提供的值与现有值比较判断是否重新 measure
+- 在 View.onMeasure 后，mPrivateFlags 设置 PFLAG_LAYOUT_REQUIRED，用于 layout
 
 ```java
 public final void measure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -235,11 +518,11 @@ public static int getDefaultSize(int size, int measureSpec) {
 }
 ```
 
-### ViewGroup 默认 onMeasure
+#### ViewGroup.measure()
 
-对于 ViewGroup 来说，除了处理完成自己的 measure，还需要遍历调用所有子元素的 measure 方法。
+ViewGroup 没有重写 onMeasure()，只是提供了 measureChildren()/measureChildWithMargins() 来测量子 View。不同的 ViewGroup 根据自身特性，在处理了自身的 measure 逻辑后，还需要遍历所有子 View 的 measure() 来得到最后的尺寸大小。
 
-但 ViewGroup 没有重写 onMeasure 方法，而是提供了 measureChildren()/measureChildWithMargins() 来测量子 View。在测量过程中，实际上有两个对宽高的限制要求：
+measureChildren()/measureChildWithMargins() 来测量子 View。在测量过程中，getChildMeasureSpec() 有两个对宽高的限制要求：
 
 - SpecMode 代表父 View 对测量的要求
 - LayoutParams 则代表着开发者对 View 的测量要求
@@ -354,18 +637,30 @@ public static int resolveSizeAndState(int size, int measureSpec, int childMeasur
 无论哪种 ViewGroup，其测量过程的核心思想没有变：
 
 > 1、根据子布局的 layout_xx 参数，结合从父布局拿到测量结果，生成子布局的测量结果
->  2、将为子布局生成的测量结果传递给子布局，子布局进行1步骤。这是个递归的过程，当遇到的子布局是View时，递归结束，开始回溯
+>  2、将为子布局生成的测量结果传递给子布局，子布局进行1步骤。这是个递归的过程，当遇到的子布局是 View 时，递归结束，开始回溯
 >  3、根据子布局自己测量后的结果，结合父布局给自己的测量结果，记录下自己的测量值，至此一个 ViewGroup 测量完毕
 
-## layout
+### Layout 流程
 
-layout 过程完成了布局逻辑，确定了 View 的位置。
-
-### ViewRootImpl performLayout
-
-在 ViewRootImpl 的 performTraversals 方法中调用 performLayout 开启了布局流程。其中调用 mView 的 layout 过程根据 measure 的结果，确定了 View 的摆放位置
+Layout 流程根据 Measure 中各个子 View 计算出的大小，来确定每个子 View 的位置。完成后会确定 View 的 mLeft、mRight、mTop、mBottom，也就确定了 getWidth() 和 getHeight() 的值
 
 ```java
+//View.java
+public final int getWidth() {
+    return mRight - mLeft;
+}
+
+public final int getHeight() {
+    return mBottom - mTop;
+}
+```
+
+#### ViewRootImpl.performLayout()
+
+在 ViewRootImpl 的 performTraversals 方法中调用 performLayout 开启了布局流程。其中调用 mView 的 layout 过程根据 measure 的结果，确定了 View 的摆放位置。
+
+```java
+//ViewRootImpl.java
 private void performLayout(WindowManager.LayoutParams lp, int desiredWindowWidth, int desiredWindowHeight) {
     ...
     mInLayout = true;
@@ -377,8 +672,19 @@ private void performLayout(WindowManager.LayoutParams lp, int desiredWindowWidth
     ...
     mInLayout = false;
 }
+```
 
-// 入参传入的 l\t\r\b 分别是自身在父View中的坐标
+#### View.layout()
+
+View.measure 流程中，会有以下几个关键的变量或标识赋值：
+
+- 判断 mPrivateFlags 设置 PFLAG_LAYOUT_REQUIRED 来开启 layout
+- layout 完成后 mPrivateFlags 清除 PFLAG_LAYOUT_REQUIRED
+- layout 完成后 mPrivateFlags 清除 PFLAG_FORCE_LAYOUT
+- 在 setFrame() 中如果尺寸发生变化，mPrivateFlags 设置 PFLAG_DRAWN 标识并调用 invalidate
+
+```java
+//View.java
 public void layout(int l, int t, int r, int b) {
     //记录当前的坐标值
     int oldL = mLeft;
@@ -447,7 +753,7 @@ protected boolean setFrame(int left, int top, int right, int bottom) {
 
 当自身的大小位置确定后，就可以调用 onLayout() 确定子View 的布局。
 
-### 获取 View 的尺寸位置方法
+#### 获取 View 的尺寸位置方法
 
 Activity 的启动过程和 View 的加载是异步的，在 onCreate、onStart、onResume 中均无法正确得到某个 View 的宽高信息，有以下方法可以解决：
 
@@ -465,17 +771,14 @@ Activity 的启动过程和 View 的加载是异步的，在 onCreate、onStart�
 |           getLocationOnScreen()           |        获得 View 相对于屏幕的坐标        |    屏幕    |
 |          getGlobalVisibleRect()           |    获得 View 可见部分相对于屏幕的坐标    | 屏幕左上角 |
 |           getLocalVisibleRect()           | 获得 View 可见部分相对于自身左上角的坐标 | 自身左上角 |
-|                                           |                                          |            |
 
-## draw
+### Draw 流程
 
-draw  过程完成了绘制逻辑，确定了 View 的内容，将内容绘制到 layout 确定的区域。
-
-### ViewRootImpl performDraw
+#### ViewRootImpl.performDraw()
 
 ```java
+//ViewRootImpl.java
 private void performDraw() {
-    ...
     final boolean fullRedrawNeeded = mFullRedrawNeeded || mReportNextDraw;
     mIsDrawing = true;
     ...
@@ -485,11 +788,9 @@ private void performDraw() {
     } fially {
         mIsDrawing = false;
     }
-    ...
 }
 
 private boolean draw(boolean fullRedrawNeeded) {
-    ...
     if (mAttachInfo.mThreadedRenderer != null && mAttachInfo.mThreadedRenderer.isEnabled()) {
         ...
         //硬件加速绘制
@@ -501,7 +802,6 @@ private boolean draw(boolean fullRedrawNeeded) {
             return false;
         }
     }
-    ...
 }
 
 private boolean drawSoftware(Surface surface, AttachInfo attachInfo, int xoff, int yoff, boolean scalingRequired, Rect dirty, Rect surfaceInsets) {
@@ -517,17 +817,59 @@ private boolean drawSoftware(Surface surface, AttachInfo attachInfo, int xoff, i
 }
 ```
 
-不管是硬件加速绘制还是软件绘制，都会设置重绘的矩形区域，对于硬件加速绘制来说，重绘的区域为整个 Window 的大小，对于软件绘制来说是设置相交的矩形区域。
+使用软件绘制的时候，绘制操作都是通过 CPU 计算并写入 Bitmap，最终 Bitmap 直接渲染到屏幕上，当某个 View 需要刷新的时候，计算刷新的脏区域，在相交的地方重新绘制，重走 draw 过程。软件绘制的 Canvas 对象通过 lockCanvas 生成后，会传递给所有的子布局，所有 View 树共享一个 Canvas 对象，Canvas类型为：CompatibleCanvas。
 
-硬件绘制的 Canvas 对象每个都是重新生成的，Canvas类型为：RecordingCanvas。
+使用硬件绘制的时候，绘制操作先被记录到 RenderNode 中，当渲染的时候，将这些操作集合交给 GPU 计算处理，当某个 View 需要刷新的时候，只需要重新生成与之相关的操作指令集，需要重走Draw过程，大大减少了无效的绘制请求，节约了CPU时间，提升程序运行流畅度。硬件绘制的 Canvas 对象每个都是重新生成的，Canvas类型为：RecordingCanvas。
 
-软件绘制的 Canvas 对象通过 lockCanvas 生成后，会传递给所有的子布局，所有 View树 共享一个 Canvas 对象，Canvas类型为：CompatibleCanvas。
+#### 硬件加速的开启和关闭
 
-### View onDraw
+硬件加速分为4个层级来控制：
 
-View 的绘制统一在 draw() 方法中调度，最先开始的是 drawBackground() 它负责绘制 View 的背景，接着就会调用 onDraw() 方法来完成 View 本体的绘制，然后通过调用 dispatchDraw() 方法通知子 View 开始绘制，最后会调用 onDrawForeground() 绘制前景：
+- Application：在 Application 标签下，添加字段控制硬件加速的开启和关闭
+
+  ```xml
+  <application
+  	android:hardwareAccelerated="true/false">
+  </application>
+  ```
+
+- Activity：在 Activity 标签下，添加字段控制硬件加速的开启和关闭
+
+  ```xml
+  <activity
+  	android:hardwareAccelerated="true/false">
+  </activity>
+  ```
+
+- Window：只能开启硬件加速
+
+  ```java
+  getWindow().setFlags(
+  	WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+  	WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
+  ```
+
+- View：只能关闭硬件加速
+
+  ```java
+  View.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+  ```
+
+#### View.draw()
+
+View.draw 流程中，会有以下几个关键的变量或标识赋值：
+
+- mPrivateFlags 清除 PFLAG_DRAWN 标识
+
+View 的绘制统一在 draw() 方法中调度，按照顺序：
+
+1. drawBackground()：绘制 View 的背景
+2. onDraw()：View 本体的绘制
+3. dispatchDraw()：子 View 开始绘制
+4. onDrawForeground()：绘制前景
 
 ```java
+//View.java
 public void draw(Canvas canvas) {
     ...
     //标记PFLAG_DRAWN表示已经完成绘制
@@ -565,7 +907,13 @@ public void draw(Canvas canvas) {
 }
 ```
 
-有一些地方，ViewGroup 没有背景时会绕过 draw 而直接调用 dispatchDraw 方法，所以 ViewGroup 绘制往往是写在 dispatchDraw() 中。ViewGroup 默认会开启一个标志位 willNotDraw，如果需要 ViewGroup 也走 onDraw 方法，需要调用 setWillNotDraw() 来设置关闭。
+#### ViewGroup.dispatchDraw()
+
+当 ViewGroup 没有背景时会绕过 onDraw() 直接调用 dispatchDraw()，所以 ViewGroup 绘制往往是写在 dispatchDraw() 中。
+
+ViewGroup 默认会开启一个标志位 willNotDraw，如果需要 ViewGroup 也走 onDraw 方法，需要调用 setWillNotDraw() 来设置关闭。
+
+重写 ViewGroup 的 isChildrenDrawingOrderEnabled() 方法，可以修改子 View 的绘制顺序。
 
 ```java
 protected void dispatchDraw(Canvas canvas) {
@@ -617,585 +965,39 @@ private static View getAndVerifyPreorderedView(ArrayList<View> preorderedList, V
 }
 ```
 
-重写 View/ViewGroup 的 isChildrenDrawingOrderEnabled() 方法，可以修改子 View 的绘制顺序。
+#### ViewGroup.drawChild()
 
-## View 主动刷新方法
-
-### invalidate
-
-View.invalidate() 表示当前绘制内容无效，需要重新绘制。
+ViewGroup.drawChild() 需要主动调用，他会保证子 View 的大小不超过自身的大小，具体代码在：
 
 ```java
-public void invalidate() {
-    invalidate(true);
-}
-
-public void invalidate(boolean invalidateCache) {
-    //invalidateCache 使绘制缓存失效
-    invalidateInternal(0, 0, mRight - mLeft, mBottom - mTop, invalidateCache, true);
-}
-
-
-void invalidateInternal(int l, int t, int r, int b, boolean invalidateCache, boolean fullInvalidate) {
-    ...
-    //设置了跳过绘制标记
-    if (skipInvalidate()) {
-        return;
-    }
-
-    //PFLAG_DRAWN在draw()中被标识，表示此前该View已经绘制过
-    //PFLAG_HAS_BOUNDS在setFrame()中被标识，表示该View已经layout过，确定过坐标了
-    if ((mPrivateFlags & (PFLAG_DRAWN | PFLAG_HAS_BOUNDS)) == (PFLAG_DRAWN | PFLAG_HAS_BOUNDS)
-            || (invalidateCache && (mPrivateFlags & PFLAG_DRAWING_CACHE_VALID) == PFLAG_DRAWING_CACHE_VALID)
-            || (mPrivateFlags & PFLAG_INVALIDATED) != PFLAG_INVALIDATED
-            || (fullInvalidate && isOpaque() != mLastIsOpaque)) {
-        if (fullInvalidate) {
-            //默认true
-            mLastIsOpaque = isOpaque();
-            //清除绘制标记
-            mPrivateFlags &= ~PFLAG_DRAWN;
-        }
-
-        //需要绘制
-        mPrivateFlags |= PFLAG_DIRTY;
-
-        if (invalidateCache) {
-            //1、加上绘制失效标记
-            //2、清除绘制缓存有效标记
-            //这两标记在硬件加速绘制分支用到
-            mPrivateFlags |= PFLAG_INVALIDATED;
-            mPrivateFlags &= ~PFLAG_DRAWING_CACHE_VALID;
-        }
-        
-        final AttachInfo ai = mAttachInfo;
-        final ViewParent p = mParent;
-        if (p != null && ai != null && l < r && t < b) {
-            final Rect damage = ai.mTmpInvalRect;
-            //记录需要重新绘制的区域 damge，该区域为该View尺寸
-            damage.set(l, t, r, b);
-            //p 为该View的父布局，调用父布局的invalidateChild
-            p.invalidateChild(this, damage);
-        }
-        ...
-    }
-}
-```
-
-当前要刷新的 View 确定了刷新区域后，就调用父布局的 invalidateChild() 方法，方法内区分了硬件加速绘制和软件绘制，最终调用到 ViewRootImpl  的方法
-
-```java
-//ViewGroup.java
-public final void invalidateChild(View child, final Rect dirty) {
-    final AttachInfo attachInfo = mAttachInfo;
-    if (attachInfo != null && attachInfo.mHardwareAccelerated) {
-        //如果是支持硬件加速，则走该分支
-        onDescendantInvalidated(child, child);
-        return;
-    }
-    //软件绘制
-    ViewParent parent = this;
-    if (attachInfo != null) {
-        ...
-        do {
-            View view = null;
-            if (parent instanceof View) {
-                view = (View) parent;
+boolean draw(Canvas canvas, ViewGroup parent, long drawingTime) {
+    //没有开启硬件加速
+    if (!drawingWithRenderNode) {
+        //parentFlags 为父布局的flag
+        //若是父布局需要裁剪子布局，也就是说clipChildren==true
+        //那么就需要对canvas进行裁剪
+        if ((parentFlags & ViewGroup.FLAG_CLIP_CHILDREN) != 0 && cache == null) {
+            //软件绘制offsetForScroll==true
+            if (offsetForScroll) {
+                //裁剪canvas与子布局大小一致
+                //sx,sy 是scroll值，没设置scroll时sx,sy都为0
+                canvas.clipRect(sx, sy, sx + getWidth(), sy + getHeight());
             }
-            ...
-            parent = parent.invalidateChildInParent(location, dirty);
-        } while (parent != null);
     }
 }
 ```
 
-硬件绘制分支 onDescendantInvalidated() 会向上遍历父布局，并将父布局中的 PFLAG_DRAWING_CACHE_VALID 标记清空，也就是绘制缓存清空。最终 ViewRootImpl 对象调用 scheduleTraversals() 开启刷新流程。
-
-```java
-//View.java
-public void onDescendantInvalidated(@NonNull View child, @NonNull View target) {
-    mPrivateFlags |= (target.mPrivateFlags & PFLAG_DRAW_ANIMATION);
-    
-    if ((target.mPrivateFlags & ~PFLAG_DIRTY_MASK) != 0) {
-       //此处都会走
-        mPrivateFlags = (mPrivateFlags & ~PFLAG_DIRTY_MASK) | PFLAG_DIRTY;
-        //清除绘制缓存有效标记
-        mPrivateFlags &= ~PFLAG_DRAWING_CACHE_VALID;
-    }
-    
-    if (mLayerType == LAYER_TYPE_SOFTWARE) {
-        //如果是开启了软件绘制，则加上绘制失效标记
-        mPrivateFlags |= PFLAG_INVALIDATED | PFLAG_DIRTY;
-        //更改target指向
-        target = this;
-    }
-
-    if (mParent != null) {
-        //调用父布局的onDescendantInvalidated
-        mParent.onDescendantInvalidated(this, target);
-    }
-}
-
-//ViewRootImpl.java
-public void onDescendantInvalidated(@NonNull View child, @NonNull View descendant) {
-    if ((descendant.mPrivateFlags & PFLAG_DRAW_ANIMATION) != 0) {
-        mIsAnimating = true;
-    }
-    invalidate();
-}
-
-void invalidate() {
-    //mDirty 为脏区域，也就是需要重绘的区域，mWidth，mHeight 为Window尺寸
-    mDirty.set(0, 0, mWidth, mHeight);
-    if (!mWillDrawSoon) {
-        //开启View 三大流程
-        scheduleTraversals();
-    }
-}
-```
-
-软件绘制分支 invalidateChildInParent() 会向上遍历父布局，并将父布局中的 PFLAG_DRAWING_CACHE_VALID 标记清空，也就是绘制缓存清空。最终 ViewRootImpl 对象调用 scheduleTraversals() 开启刷新流程。
-
-```java
-//ViewGroup.java
-public ViewParent invalidateChildInParent(final int[] location, final Rect dirty) {
-    //dirty 为失效的区域，也就是需要重绘的区域
-    if ((mPrivateFlags & (PFLAG_DRAWN | PFLAG_DRAWING_CACHE_VALID)) != 0) {
-        //该View绘制过或者绘制缓存有效
-        if ((mGroupFlags & (FLAG_OPTIMIZE_INVALIDATE | FLAG_ANIMATION_DONE))
-                != FLAG_OPTIMIZE_INVALIDATE) {
-            //修正重绘的区域
-            dirty.offset(location[CHILD_LEFT_INDEX] - mScrollX,
-                    location[CHILD_TOP_INDEX] - mScrollY);
-            if ((mGroupFlags & FLAG_CLIP_CHILDREN) == 0) {
-                //如果允许子布局超过父布局区域展示
-                //则该dirty 区域需要扩大
-                dirty.union(0, 0, mRight - mLeft, mBottom - mTop);
-            }
-            final int left = mLeft;
-            final int top = mTop;
-            if ((mGroupFlags & FLAG_CLIP_CHILDREN) == FLAG_CLIP_CHILDREN) {
-                //默认会走这，如果不允许子布局超过父布局区域展示，则取相交区域
-                if (!dirty.intersect(0, 0, mRight - left, mBottom - top)) {
-                    dirty.setEmpty();
-                }
-            }
-            //记录偏移，用以不断修正重绘区域，使之相对计算出相对屏幕的坐标
-            location[CHILD_LEFT_INDEX] = left;
-            location[CHILD_TOP_INDEX] = top;
-        } else {
-            ...
-        }
-        //标记缓存失效
-        mPrivateFlags &= ~PFLAG_DRAWING_CACHE_VALID;
-        if (mLayerType != LAYER_TYPE_NONE) {
-            //如果设置了缓存类型，则标记该View需要重绘
-            mPrivateFlags |= PFLAG_INVALIDATED;
-        }
-        //返回父布局
-        return mParent;
-    }
-    return null;
-}
-
-//ViewRootImpl.java
-public ViewParent invalidateChildInParent(int[] location, Rect dirty) {
-    checkThread();
-    if (DEBUG_DRAW) Log.v(mTag, "Invalidate child: " + dirty);
-    if (dirty == null) {
-        //脏区域为空，则默认刷新整个窗口
-        invalidate();
-        return null;
-    } else if (dirty.isEmpty() && !mIsAnimating) {
-        return null;
-    }
-    ...
-    invalidateRectOnScreen(dirty);
-    return null;
-}
-
-private void invalidateRectOnScreen(Rect dirty) {
-    final Rect localDirty = mDirty;
-    //合并脏区域，取并集
-    localDirty.union(dirty.left, dirty.top, dirty.right, dirty.bottom);
-    ...
-    if (!mWillDrawSoon && (intersected || mIsAnimating)) {
-        //开启View的三大绘制流程
-        scheduleTraversals();
-    }
-}
-```
-
-### postInvalidate
-
-因为 ViewRootImpl 的 invalidateChildInParent 方法中调用了 checkThread()，invalidate() 只能在主线程调用，所以在子线程中开启刷新流程，需要调用 postInvalidate()。
-
-```java
-//View.java
-public void postInvalidate() {
-    postInvalidateDelayed(0);
-}
-
-public void postInvalidateDelayed(long delayMilliseconds) {
-    final AttachInfo attachInfo = mAttachInfo;
-    if (attachInfo != null) {
-        //还是靠ViewRootImpl
-        attachInfo.mViewRootImpl.dispatchInvalidateDelayed(this, delayMilliseconds);
-    }
-}
-
-//ViewRootImpl.java
-public void dispatchInvalidateDelayed(View view, long delayMilliseconds) {
-    //此处Message.obj = view
-    Message msg = mHandler.obtainMessage(MSG_INVALIDATE, view);
-    mHandler.sendMessageDelayed(msg, delayMilliseconds);
-}
-
-public void handleMessage(Message msg) {
-    switch (msg.what) {
-        case MSG_INVALIDATE:
-            //obj 即为待刷新的View
-            ((View) msg.obj).invalidate();
-            break;
-            ...
-    }
-}
-```
-
-### requestLayout
-
-requestLayout 向上遍历父布局，给每个布局设置 PFLAG_FORCE_LAYOU T和 PFLAG_INVALIDATED 标记，直到ViewRootImpl 对象调用 scheduleTraversals() 开启刷新流程。
-
-```java
-//View.java
-public void requestLayout() {
-    //清空测量缓存
-    if (mMeasureCache != null) mMeasureCache.clear();
-    ...
-    //添加强制layout 标记，该标记触发layout
-    mPrivateFlags |= PFLAG_FORCE_LAYOUT;
-    //添加重绘标记
-    mPrivateFlags |= PFLAG_INVALIDATED;
-    //如果布局没有结束就不会布局 
-    if (mParent != null && !mParent.isLayoutRequested()) {
-        //如果上次的layout 请求已经完成
-        //父布局继续调用requestLayout
-        mParent.requestLayout();
-    }
-    ...
-}
-
-//PFLAG_FORCE_LAYOUT会在layout()中移除
-public boolean isLayoutRequested() {
-    return (mPrivateFlags & PFLAG_FORCE_LAYOUT) == PFLAG_FORCE_LAYOUT;
-}
-
-//ViewRootImpl.java
-public void requestLayout() {
-    //是否正在进行layout过程
-    if (!mHandlingLayoutInLayoutRequest) {
-        //检查线程是否一致
-        checkThread();
-        //标记有一次layout的请求
-        mLayoutRequested = true;
-        //开启View 三大流程
-        scheduleTraversals();
-    }
-}
-```
-
-## 布局加载 
-
-### LayoutInflater
-
-获取 LayoutInflater 实例
-
-```java
-LayoutInflater layoutInflater = LayoutInflater.from(context);
-
-public static LayoutInflater from(Context context) {
-    LayoutInflater LayoutInflater =
-            (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-    if (LayoutInflater == null) {
-        throw new AssertionError("LayoutInflater not found.");
-    }
-    return LayoutInflater;
-}
-```
-
-inflate 布局问加你
-
-```java
-public View inflate(@LayoutRes int resource, @Nullable ViewGroup root) {
-    return inflate(resource, root, root != null);
-}
-
-public View inflate(@LayoutRes int resource, @Nullable ViewGroup root, boolean attachToRoot) {
-    final Resources res = getContext().getResources();
-    View view = tryInflatePrecompiled(resource, res, root, attachToRoot);
-    if (view != null) {
-        return view;
-    }
-    XmlResourceParser parser = res.getLayout(resource);
-    try {
-        return inflate(parser, root, attachToRoot);
-    } finally {
-        parser.close();
-    }
-}
-
-public View inflate(XmlPullParser parser, @Nullable ViewGroup root, boolean attachToRoot) {
-    synchronized (mConstructorArgs) {
-        final Context inflaterContext = mContext;
-        final AttributeSet attrs = Xml.asAttributeSet(parser);
-        Context lastContext = (Context) mConstructorArgs[0];
-        mConstructorArgs[0] = inflaterContext;
-        View result = root;
-        try {
-            advanceToRootNode(parser);
-            final String name = parser.getName();
-            
-            final View temp = createViewFromTag(root, name, inflaterContext, attrs);
-            ViewGroup.LayoutParams params = null;
-            if (root != null) {
-            	params = root.generateLayoutParams(attrs);
-            	if (!attachToRoot) {
-            		temp.setLayoutParams(params);
-            	}
-            }
-            rInflateChildren(parser, temp, attrs, true);
-            if (root != null && attachToRoot) {
-            	root.addView(temp, params);
-            }
-        }
-        return result;
-    }
-}
-```
-
-inflate 使用 pull 来解析 xml 文件，然后调用 createViewFromTag() 创建出根 View，然后调用 rInflateChildren() 方法循环遍历这个根布局下的子元素。
-
-```java
-View createViewFromTag(View parent, String name, Context context, AttributeSet attrs,
-        boolean ignoreThemeAttr) {
-    ...
-    try {
-        View view = tryCreateView(parent, name, context, attrs);
-        if (view == null) {
-            final Object lastContext = mConstructorArgs[0];
-            mConstructorArgs[0] = context;
-            try {
-                if (-1 == name.indexOf('.')) {
-                    view = onCreateView(context, parent, name, attrs);
-                } else {
-                    view = createView(context, name, null, attrs);
-                }
-            } finally {
-                mConstructorArgs[0] = lastContext;
-            }
-        }
-        return view;
-    }
-    ...
-}
-
-public final View tryCreateView(@Nullable View parent, @NonNull String name,
-    @NonNull Context context,
-    @NonNull AttributeSet attrs) {
-    View view;
-    if (mFactory2 != null) {
-        view = mFactory2.onCreateView(parent, name, context, attrs);
-    } else if (mFactory != null) {
-        view = mFactory.onCreateView(name, context, attrs);
-    } else {
-        view = null;
-    }
-    if (view == null && mPrivateFactory != null) {
-        view = mPrivateFactory.onCreateView(parent, name, context, attrs);
-    }
-    return view;
-}
-```
-
-在createViewFromTag() 中会调用 tryCreateView() 进行三次拦截最终调用系统方法生成 View，其中开发者可以在 Activity 的 onCreate() 中对 mFactory2（通过setFactory2进行赋值 ）和mFactory（通过setFactory进行赋值 ） 2个对象设置来完成 View 的加载。
-
-如果 tryCreateView() 方法没有返回一个 View，那么就由系统生成 View。
-
-### AsyncLayoutInflater
-
-AsyncLayoutInflater 就是把 View 的一些初始化加载过程，放在子线程，结束后，在将结果回调到主线程。
-
-```java
-@Override
-protected void onCreate(Bundle savedInstanceState) {
-    super.onCreate(savedInstanceState);
-    new AsyncLayoutInflater(this).inflate(R.layout.activity_main,null, new AsyncLayoutInflater.OnInflateFinishedListener(){
-        @Override
-        public void onInflateFinished(View view, int resid, ViewGroup parent) {
-            setContentView(view);
-            rv = findViewById(R.id.tv_right);
-            rv.setLayoutManager(new V7LinearLayoutManager(MainActivity.this));
-            rv.setAdapter(new RightRvAdapter(MainActivity.this));
-        }
-    });
-}
-```
-
-AsyncLayoutInflater 的构造方法中做了三件事：
-
-- 创建 BasicInflater
-- 创建 Handler
-- 创建 InflateThread
-
-```java
-public final class AsyncLayoutInflater {
-    private static final String TAG = "AsyncLayoutInflater";
-
-    LayoutInflater mInflater;
-    Handler mHandler;
-    InflateThread mInflateThread;
-
-    public AsyncLayoutInflater(@NonNull Context context) {
-        mInflater = new BasicInflater(context);
-        mHandler = new Handler(mHandlerCallback);
-        mInflateThread = InflateThread.getInstance();
-    }
-
-    @UiThread
-    public void inflate(@LayoutRes int resid, @Nullable ViewGroup parent,
-            @NonNull OnInflateFinishedListener callback) {
-        if (callback == null) {
-            throw new NullPointerException("callback argument may not be null!");
-        }
-        InflateRequest request = mInflateThread.obtainRequest();
-        request.inflater = this;
-        request.resid = resid;
-        request.parent = parent;
-        request.callback = callback;
-        mInflateThread.enqueue(request);
-    }
-        ....
-
-```
-
-InflateThread 的作用是创建一个子线程，将 inflate 请求添加到阻塞队列中，并按顺序执行 BasicInflater.inflate 操作，不管 infalte 成功或失败后，都会将 request 消息发送给主线程做处理。
-
-```java
-private static class InflateThread extends Thread {
-    private static final InflateThread sInstance;
-    static {
-        sInstance = new InflateThread();
-        sInstance.start();
-    }
-
-    public static InflateThread getInstance() {
-        return sInstance;
-    }
-        //生产者-消费者模型，阻塞队列
-    private ArrayBlockingQueue<InflateRequest> mQueue = new ArrayBlockingQueue<>(10);
-    //使用了对象池来缓存InflateThread对象，减少对象重复多次创建，避免内存抖动
-    private SynchronizedPool<InflateRequest> mRequestPool = new SynchronizedPool<>(10);
-
-    public void runInner() {
-        InflateRequest request;
-        try {
-            //从队列中取出一条请求，如果没有则阻塞
-            request = mQueue.take();
-        } catch (InterruptedException ex) {
-            // Odd, just continue
-            Log.w(TAG, ex);
-            return;
-        }
-
-        try {
-            //inflate操作（通过调用BasicInflater类）
-            request.view = request.inflater.mInflater.inflate(
-                    request.resid, request.parent, false);
-        } catch (RuntimeException ex) {
-            // 回退机制：如果inflate失败，回到主线程去inflate
-            Log.w(TAG, "Failed to inflate resource in the background! Retrying on the UI"
-                    + " thread", ex);
-        }
-        //inflate成功或失败，都将request发送到主线程去处理
-        Message.obtain(request.inflater.mHandler, 0, request)
-                .sendToTarget();
-    }
-
-    @Override
-    public void run() {
-        //死循环（实际不会一直执行，内部是会阻塞等待的）
-        while (true) {
-            runInner();
-        }
-    }
-
-    //从对象池缓存中取出一个InflateThread对象
-    public InflateRequest obtainRequest() {
-        InflateRequest obj = mRequestPool.acquire();
-        if (obj == null) {
-            obj = new InflateRequest();
-        }
-        return obj;
-    }
-
-    //对象池缓存中的对象的数据清空，便于对象复用
-    public void releaseRequest(InflateRequest obj) {
-        obj.callback = null;
-        obj.inflater = null;
-        obj.parent = null;
-        obj.resid = 0;
-        obj.view = null;
-        mRequestPool.release(obj);
-    }
-
-    //将inflate请求添加到ArrayBlockingQueue（阻塞队列）中
-    public void enqueue(InflateRequest request) {
-        try {
-            mQueue.put(request);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(
-                    "Failed to enqueue async inflate request", e);
-        }
-    }
-}
-```
-
-mHandlerCallback 的作用是当子线程中 inflate 失败后，会继续再主线程中进行 inflate 操作，最终通过OnInflateFinishedListener 接口将 view 回调到主线程。
-
-```java
-private Callback mHandlerCallback = new Callback() {
-    @Override
-    public boolean handleMessage(Message msg) {
-        InflateRequest request = (InflateRequest) msg.obj;
-        if (request.view == null) {
-            //view == null说明inflate失败
-            //继续再主线程中进行inflate操作
-            request.view = mInflater.inflate(
-                    request.resid, request.parent, false);
-        }
-        //回调到主线程
-        request.callback.onInflateFinished(
-                request.view, request.resid, request.parent);
-        mInflateThread.releaseRequest(request);
-        return true;
-    }
-};
-```
-
-使用AsyncLayoutInflate主要有如下几个局限性：
-
-1. 所有构建的 View 中不能直接使用 Handler 或者是调用 Looper.myLooper()，因为异步线程默认没有调用 Looper.prepare ()
-2. 异步转换出来的 View 并没有被加到父 View 中，需要我们自己手动添加；
-3. AsyncLayoutInflater 不支持设置 LayoutInflater.Factory 或者 LayoutInflater.Factory2
-4. 同时缓存队列默认 10 的大小限制如果超过了10个则会导致主线程的等待
-5. 使用单线程来做全部的 inflate 工作，如果一个界面中 layout 很多不一定能满足需求
 
 
+["一文读懂"系列：Android屏幕刷新机制 - 掘金 (juejin.cn)](https://juejin.cn/post/7163858831309537294)
 
-[Android invalidate/postInvalidate/requestLayout-彻底厘清 - 简书 (jianshu.com)](https://www.jianshu.com/p/02073c90ef98)
-
-[Android Window 如何确定大小 onMeasure()多次执行原因 - 简书 (jianshu.com)](https://www.jianshu.com/p/a7ab49462ebe)
+[最全的View绘制流程（下）— Measure、Layout、Draw - 简书 (jianshu.com)](https://www.jianshu.com/p/3366e4bec7ce)
 
 [Android：6种高效 & 准确获取View坐标位置的方式 - 掘金 (juejin.cn)](https://juejin.cn/post/6844903975175602189)
 
+[Android 自定义View之Draw过程(下) - 简书 (jianshu.com)](https://www.jianshu.com/p/76b8bd023fee)
 
+[遇到个难题，怎么修改子View绘制顺序？ (qq.com)](https://mp.weixin.qq.com/s?__biz=MzAxMTI4MTkwNQ==&mid=2650837638&idx=2&sn=df389d0d84dc4c847f9e58a1f9f7f70f&chksm=80b74618b7c0cf0ebb8c355b3f1f9bebac3f686013f0de42c900c1aa00dd789bf48a916bda4b)
+
+[Android clipChildren 原来要这么用？ (qq.com)](https://mp.weixin.qq.com/s?__biz=MzAxMTI4MTkwNQ==&mid=2650837193&idx=2&sn=28f6afc3b1acda50ce0308cd37648990&chksm=80b74457b7c0cd413e25bc16fbe9456928238242da3d506d2fb8eee693a9210481405bb29aea)
 
