@@ -1,0 +1,25 @@
+conda update conda
+conda update --all
+
+#conda update anaconda
+#conda update anaconda-navigator
+
+python -m pip install -U pyOpenSSL cryptography
+
+python -m pip install --upgrade pip
+
+conda --version                   # 查看 conda 版本
+conda update -n base conda        # update最新版本的conda
+conda create -n xxxx              # 创建名为 xxxx 的虚拟环境
+conda create -n xxxx python=3.5   # 创建包含 python3.5 的名为 xxxx 的虚拟环境
+conda remove -n xxxx --all        # 删除名为 xxxx 的虚拟环境
+conda activate xxxx               # 进入 xxxx 环境
+source activate xxxx
+conda deactivate                  # 退出环境
+source activate
+conda env list                    # 显示所有的虚拟环境
+conda info --envs                 # 查看当前环境
+
+conda clean -p                    # 删除没有用的包
+conda clean -t                    # tar打包
+conda clean -y -all               # 删除所有的安装包及cache

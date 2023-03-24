@@ -80,7 +80,7 @@ void doTraversal() {
 }
 ```
 
-接下来就要分析 mChoreographer 是如何发送一个 Choreographer.CALLBACK_TRAVERSAL 任务，来在 VSync 信号来临的时候启动 doTraversal()，开启 View 的测量布局绘制流程的。
+接下来就是通过 mChoreographer.postCallback() 来监听 VSyns 信号，然后回调 Runnable 类型的参数。需要注意的是在最终调用到 postCallbackDelayedInternal() 时，参数 callbackType=Choreographer.CALLBACK_TRAVERSAL，参数token=null。
 
 ```java
 Choreographer.java
@@ -182,16 +182,11 @@ private final class FrameDisplayEventReceiver extends DisplayEventReceiver
 void doFrame(long frameTimeNanos, int frame) {
     ...
     try {
-        mFrameInfo.markInputHandlingStart();
-                    //处理输入事件
+        //处理输入事件
         doCallbacks(Choreographer.CALLBACK_INPUT, frameTimeNanos);
-
-        mFrameInfo.markAnimationsStart();
-                    //处理动画事件
+        //处理动画事件
         doCallbacks(Choreographer.CALLBACK_ANIMATION, frameTimeNanos);
-
-        mFrameInfo.markPerformTraversalsStart();
-                    //处理CALLBACK_TRAVERSAL，三大绘制流程
+        //处理CALLBACK_TRAVERSAL，三大绘制流程
         doCallbacks(Choreographer.CALLBACK_TRAVERSAL, frameTimeNanos);
     } 
     ...
@@ -203,6 +198,31 @@ void doCallbacks(int callbackType, long frameTimeNanos) {
     for (CallbackRecord c = callbacks; c != null; c = c.next) {
         c.run(frameTimeNanos);
     }
+}
+
+//CallbackRecord.java
+public void run(long frameTimeNanos) {
+    if (token == FRAME_CALLBACK_TOKEN) {
+        ((FrameCallback)action).doFrame(frameTimeNanos);
+    } else {
+        ((Runnable)action).run();
+    }
+}
+```
+
+在 Choregrapher 中，除了 postCallback() 可以监听 VSync 信号然后执行 Runnable，还有可以通过 postFrameCallback() 监听 VSync 信号然后执行 FrameCallback。需要注意的是在最终调用到 postCallbackDelayedInternal() 时，参数 callbackType=Choreographer.CALLBACK_ANIMATION，参数token=FRAME_CALLBACK_TOKEN。
+
+```
+public void postFrameCallback(FrameCallback callback) {
+    postFrameCallbackDelayed(callback, 0);
+}
+
+public void postFrameCallbackDelayed(FrameCallback callback, long delayMillis) {
+    if (callback == null) {
+        throw new IllegalArgumentException("callback must not be null");
+    }
+    postCallbackDelayedInternal(CALLBACK_ANIMATION,
+            callback, FRAME_CALLBACK_TOKEN, delayMillis);
 }
 ```
 
