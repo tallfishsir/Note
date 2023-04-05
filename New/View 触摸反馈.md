@@ -702,6 +702,212 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 }
 ```
 
+### 嵌套滑动
+
+上面的两种滑动冲突解决方案，在嵌套滑动时，无法做到父 View 和子 View 连贯的滑动。因为 Android 提供了新的 API 用于处理平滑的嵌套滑动。嵌套滑动机制提供了两个接口 NestedScrollParent 和 NestedScrollChild，让需要支持嵌套滑动的 View 去实现不同情形下如何处理事件。
+
+NestedScrollChild 接口的调用顺序是：
+
+- 确保在滚动过程中，按照正确的顺序调用嵌套滚动方法。在开始滚动之前调用 startNestedScroll()，在实际滚动之前调用 dispatchNestedPreScroll()，滚动后调用 dispatchNestedScroll()，最后在滚动结束时调用 stopNestedScroll()。
+- 在实际滚动之前，调用 dispatchNestedPreScroll() 以允许父 View 首先消耗滚动距离。处理返回值时，需要考虑父 View 消耗的滚动距离，并相应地更新自定义 View 的滚动距离。
+- 在处理 fling 操作时，先调用 dispatchNestedPreFling()，然后根据返回值决定是否继续处理 fling。如果返回值为 true，则表示父 View 已经消耗了 fling，子 View 不需要进一步处理。如果返回值为 false，则子 View 应继续处理 fling，并在处理完毕后调用 dispatchNestedFling()。
+
+```java
+public interface NestedScrollingChild {
+    /**
+     * @param enabled 开启或关闭嵌套滑动
+     */
+    void setNestedScrollingEnabled(boolean enabled);
+
+    /**
+     * @return 返回是否开启嵌套滑动
+     */    
+    boolean isNestedScrollingEnabled();
+
+    /**
+     * 沿着指定的方向开始滑动嵌套滑动
+     * @param axes 滑动方向(SCROLL_AXIS_NONE, SCROLL_AXIS_HORIZONTAL, SCROLL_AXIS_VERTICAL)
+     * @return 返回是否找到NestedScrollingParent配合滑动
+     */
+    boolean startNestedScroll(@ScrollAxis int axes);
+
+    /**
+     * 停止嵌套滑动
+     */
+    void stopNestedScroll();
+
+    /**
+     * @return 返回是否有配合滑动NestedScrollingParent
+     */
+    boolean hasNestedScrollingParent();
+
+    /**
+     * 滑动完成后，将已经消费、剩余的滑动值分发给NestedScrollingParent
+     * @param dxConsumed 水平方向消费的距离
+     * @param dyConsumed 垂直方向消费的距离
+     * @param dxUnconsumed 水平方向剩余的距离
+     * @param dyUnconsumed 垂直方向剩余的距离
+     * @param offsetInWindow 含有View从此方法调用之前到调用完成后的屏幕坐标偏移量，
+     * 可以使用这个偏移量来调整预期的输入坐标（即上面4个消费、剩余的距离）跟踪，此参数可空。
+     * @return 返回该事件是否被成功分发
+     */
+    boolean dispatchNestedScroll(int dxConsumed, int dyConsumed,
+            int dxUnconsumed, int dyUnconsumed, @Nullable int[] offsetInWindow);
+
+    /**
+     * 在滑动之前，将滑动值分发给NestedScrollingParent
+     * @param dx 水平方向消费的距离
+     * @param dy 垂直方向消费的距离
+     * @param consumed 输出坐标数组，consumed[0]为NestedScrollingParent消耗的水平距离、
+     * consumed[1]为NestedScrollingParent消耗的垂直距离，此参数可空。
+     * @param offsetInWindow 同上dispatchNestedScroll
+     * @return 返回NestedScrollingParent是否消费部分或全部滑动值
+     */
+    boolean dispatchNestedPreScroll(int dx, int dy, @Nullable int[] consumed,
+            @Nullable int[] offsetInWindow);
+
+    /**
+     * 将惯性滑动的速度和NestedScrollingChild自身是否需要消费此惯性滑动分发给NestedScrollingParent
+     * @param velocityX 水平方向的速度
+     * @param velocityY 垂直方向的速度
+     * @param consumed NestedScrollingChild自身是否需要消费此惯性滑动
+     * @return 返回NestedScrollingParent是否消费全部惯性滑动
+     */
+    boolean dispatchNestedFling(float velocityX, float velocityY, boolean consumed);
+
+    /**
+     * 在惯性滑动之前，将惯性滑动值分发给NestedScrollingParent
+     * @param velocityX 水平方向的速度
+     * @param velocityY 垂直方向的速度
+     * @return 返回NestedScrollingParent是否消费全部惯性滑动
+     */
+    boolean dispatchNestedPreFling(float velocityX, float velocityY);
+}
+```
+
+NestedScrollingParent 接口的调用顺序是：
+
+- 在 onStartNestedScroll() 方法中，根据滚动方向和子 View 的状态决定是否接受嵌套滚动请求
+- 子 View 开始滚动时调用 onStartNestedScroll()，接受滚动请求时调用 onNestedScrollAccepted()，滚动前调用 onNestedPreScroll()，滚动后调用 onNestedScroll()，最后在滚动结束时调用 onStopNestedScroll()
+- 处理 fling 操作：在 onNestedPreFling() 和 onNestedFling() 方法中，根据子 View 的 fling 操作调整父 View 的行为
+
+```
+public interface NestedScrollingParent {
+    /**
+     * 对NestedScrollingChild发起嵌套滑动作出应答
+     * @param child 布局中包含下面target的直接父View
+     * @param target 发起嵌套滑动的NestedScrollingChild的View
+     * @param axes 滑动方向(SCROLL_AXIS_NONE, SCROLL_AXIS_HORIZONTAL, SCROLL_AXIS_VERTICAL)
+     * @return 返回NestedScrollingParent是否配合处理嵌套滑动
+     */
+    boolean onStartNestedScroll(@NonNull View child, @NonNull View target, @ScrollAxis int axes);
+
+    /**
+     * NestedScrollingParent接受嵌套滚动请求时调用。可以在此方法中执行一些初始化操作。
+     * @param child 布局中包含下面target的直接父View
+     * @param target 发起嵌套滑动的NestedScrollingChild的View
+     * @param axes 滑动方向(SCROLL_AXIS_NONE, SCROLL_AXIS_HORIZONTAL, SCROLL_AXIS_VERTICAL)
+     */
+    void onNestedScrollAccepted(@NonNull View child, @NonNull View target, @ScrollAxis int axes);
+
+    /**
+     * 嵌套滑动结束
+     * @param target 同上
+     */
+    void onStopNestedScroll(@NonNull View target);
+
+    /**
+     * NestedScrollingChild滑动完成后将滑动值分发给NestedScrollingParent回调此方法
+     * @param target 同上
+     * @param dxConsumed 水平方向消费的距离
+     * @param dyConsumed 垂直方向消费的距离
+     * @param dxUnconsumed 水平方向剩余的距离
+     * @param dyUnconsumed 垂直方向剩余的距离
+     */
+    void onNestedScroll(@NonNull View target, int dxConsumed, int dyConsumed,
+            int dxUnconsumed, int dyUnconsumed);
+
+    /**
+     * NestedScrollingChild滑动完之前将滑动值分发给NestedScrollingParent回调此方法
+     * @param target 同上
+     * @param dx 水平方向的距离
+     * @param dy 水平方向的距离
+     * @param consumed 返回NestedScrollingParent是否消费部分或全部滑动值
+     */
+    void onNestedPreScroll(@NonNull View target, int dx, int dy, @NonNull int[] consumed);
+
+    /**
+     * NestedScrollingChild在惯性滑动之前，将惯性滑动的速度和NestedScrollingChild自身是否需要消费此惯性滑动分
+     * 发给NestedScrollingParent回调此方法
+     * @param target 同上
+     * @param velocityX 水平方向的速度
+     * @param velocityY 垂直方向的速度
+     * @param consumed NestedScrollingChild自身是否需要消费此惯性滑动
+     * @return 返回NestedScrollingParent是否消费全部惯性滑动
+     */
+    boolean onNestedFling(@NonNull View target, float velocityX, float velocityY, boolean consumed);
+
+    /**
+     * NestedScrollingChild在惯性滑动之前,将惯性滑动的速度分发给NestedScrollingParent
+     * @param target 同上
+     * @param velocityX 同上
+     * @param velocityY 同上
+     * @return 返回NestedScrollingParent是否消费全部惯性滑动
+     */
+    boolean onNestedPreFling(@NonNull View target, float velocityX, float velocityY);
+
+    /**
+     * @return 返回当前嵌套滑动的方向
+     */
+    int getNestedScrollAxes();
+}
+```
+
+综合上面的流程，NestedScrollChild 和 NestedScrollParent 整体的调用流程是：
+
+- DOWN 事件
+  - NestedScrollChild.startNestedScroll() child开启滑动
+  - NestedScrollParent.onStartNestedScroll() 确定 parent 是否接受这个嵌套滚动请求
+  - NestedScrollParent.onNestedScrollAccepted() parent 初始化操作
+- MOVE 事件
+  - NestedScrollChild.dispatchNestedPreScroll() child 滑动事件传给 parent 预处理
+  - NestedScrollParent.onNestedPreScroll() parent 预处理滑动事件
+  - NestedScrollChild.dispatchNestedScroll() child 处理滑动事件
+  - NestedScrollParent.onNestedScroll() parent 处理滑动事件
+- UP 事件
+  - NestedScrollChild.dispatchNestedPreFling() child 惯性滑动事件传给 parent 预处理
+  - NestedScrollParent.onNestedPreFling() parent 预处理惯性滑动事件
+  - NestedScrollChild.dispatchNestedFling() child 处理惯性滑动事件
+  - NestedScrollParent.onNestedFling() parent 处理惯性滑动事件
+
+```mermaid
+sequenceDiagram
+    participant NSC as NestedScrollChild
+    participant NSP as NestedScrollParent
+
+    Note over NSC, NSP: Down Event
+    NSC->>NSP: startNestedScroll()
+    NSP->>NSC: onStartNestedScroll()
+    alt onStartNestedScroll() returns true
+        NSP->>NSC: onNestedScrollAccepted()
+    end
+
+    Note over NSC, NSP: Move Event
+    NSC->>NSP: dispatchNestedPreScroll()
+    NSP->>NSC: onNestedPreScroll()
+    NSC->>NSP: dispatchNestedScroll()
+    NSP->>NSC: onNestedScroll()
+
+    Note over NSC, NSP: Up Event
+    NSC->>NSP: dispatchNestedPreFling()
+    NSP->>NSC: onNestedPreFling()
+    NSC->>NSP: dispatchNestedFling()
+    NSP->>NSC: onNestedFling()
+
+```
+
+
+
 
 
 [【带着问题学】Android事件分发8连问 (qq.com)](https://mp.weixin.qq.com/s?__biz=MzA5MzI3NjE2MA==&mid=2650262749&idx=1&sn=7a2726d9927f4866f1548e0dce1dcefc&chksm=88633db2bf14b4a4a34f4bc0a6b5d2687bb4330d52ab0805e06321f6c6690277bf675bf3e07d)
@@ -717,3 +923,7 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 [安卓自定义View进阶-特殊控件的事件处理方案 (gcssloop.com)](http://www.gcssloop.com/customview/touch-matrix-region.html)
 
 [安卓自定义View进阶-多点触控详解 (gcssloop.com)](http://www.gcssloop.com/customview/multi-touch.html)
+
+[一个解决滑动冲突的新思路，无缝嵌套滑动 (qq.com)](https://mp.weixin.qq.com/s?__biz=MzA5MzI3NjE2MA==&mid=2650263545&idx=1&sn=50ab0a558ff77be6779c86496d6dfc91&chksm=88633e96bf14b7808dfa6fee8501dae95ad4bf32eef0285f15b43491597e5f19bd738fb5b95d)
+
+[Android嵌套滑动，我用NestedScrollView (qq.com)](https://mp.weixin.qq.com/s?__biz=MzA5MzI3NjE2MA==&mid=2650263010&idx=1&sn=7dfde4010a6d1723ad75d2364395a2d3&chksm=88633c8dbf14b59ba73dc21fe2542771018e11036deacb3aa43f5a18309223ee788449be08dc)
