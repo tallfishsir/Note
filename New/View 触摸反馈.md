@@ -708,8 +708,8 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 
 NestedScrollChild 接口的调用顺序是：
 
-- 确保在滚动过程中，按照正确的顺序调用嵌套滚动方法。在开始滚动之前调用 startNestedScroll()，在实际滚动之前调用 dispatchNestedPreScroll()，滚动后调用 dispatchNestedScroll()，最后在滚动结束时调用 stopNestedScroll()。
-- 在实际滚动之前，调用 dispatchNestedPreScroll() 以允许父 View 首先消耗滚动距离。处理返回值时，需要考虑父 View 消耗的滚动距离，并相应地更新自定义 View 的滚动距离。
+- 在 onTouchEvent() 不管是什么 类型的 action 都调用 startNestedScroll()。
+- 在实际滚动之前调用 dispatchNestedPreScroll()，滚动后调用 dispatchNestedScroll()，最后在滚动结束时调用 stopNestedScroll()。
 - 在处理 fling 操作时，先调用 dispatchNestedPreFling()，然后根据返回值决定是否继续处理 fling。如果返回值为 true，则表示父 View 已经消耗了 fling，子 View 不需要进一步处理。如果返回值为 false，则子 View 应继续处理 fling，并在处理完毕后调用 dispatchNestedFling()。
 
 ```java
@@ -791,7 +791,7 @@ NestedScrollingParent 接口的调用顺序是：
 - 子 View 开始滚动时调用 onStartNestedScroll()，接受滚动请求时调用 onNestedScrollAccepted()，滚动前调用 onNestedPreScroll()，滚动后调用 onNestedScroll()，最后在滚动结束时调用 onStopNestedScroll()
 - 处理 fling 操作：在 onNestedPreFling() 和 onNestedFling() 方法中，根据子 View 的 fling 操作调整父 View 的行为
 
-```
+```java
 public interface NestedScrollingParent {
     /**
      * 对NestedScrollingChild发起嵌套滑动作出应答

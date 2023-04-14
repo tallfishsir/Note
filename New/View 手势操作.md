@@ -870,6 +870,11 @@ startDragAndDrop(ClipData data, DragShadowBuilder shadowBuilder, Object myLocalS
 - myLocalState：可以用它传递本地数据，随时获取该本地数据，跨进程通信时会返回null
 - flags：控制拖拽时的操作，一般传递0即可
 
+需要注意的是：
+
+- 对于自定义 View，可以不调用 setOnDragListener() 添加 Listener，而是直接重写 onDragEvent() 方法来监听回调
+- 当 View 设置了 DragListener 后，同一个 ViewRootImpl 下任何一个 View 调用了 startDrag() 方法，Listener 都会回调。
+
 ### ViewDragHelper
 
 ViewDragHelper 是一个用于处理拖放事件的辅助类，通过接管 onInterceptTouchEvent() 和 onTouchEvent() 提供不同情况下的接口简化拖动 View 逻辑处理。

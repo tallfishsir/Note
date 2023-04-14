@@ -800,7 +800,7 @@ private final class ServiceHandler extends Handler {
 
 ## ThreadPoolExecutor
 
-### 核心参数
+### 构造函数
 
 ThreadPoolExecutor 是 Java 中常用的线程池实现类，用于管理线程池中线程的创建、销毁和使用。为了方便开发者创建线程池，Executors 提供了四个静态方法用于创建不同特点的线程池：
 
@@ -841,58 +841,44 @@ public ScheduledThreadPoolExecutor(int corePoolSize) {
     super(corePoolSize, Integer.MAX_VALUE, 0, NANOSECONDS,
           new DelayedWorkQueue());
 }
+
+public ThreadPoolExecutor(int corePoolSize,
+                          int maximumPoolSize,
+                          long keepAliveTime,
+                          TimeUnit unit,
+                          BlockingQueue<Runnable> workQueue,
+                          ThreadFactory threadFactory,
+                          RejectedExecutionHandler rejectedHandler) {...}
 ```
 
 线程池是通过 ThreadPoolExecutor 提供的一系列参数来配置创建的：
 
-```java
-public class ThreadPoolExecutor extends AbstractExecutorService {
-	public ThreadPoolExecutor(int corePoolSize,
-                          int maximumPoolSize,
-                          long keepAliveTime, //时间单位
-                          TimeUnit unit,
-                          BlockingQueue<Runnable> workQueue,
-                          ThreadFactory threadFactory,
-                          RejectedExecutionHandler rejectedHandler) {
-		if (corePoolSize < 0 ||
-			maximumPoolSize <= 0 ||
-			maximumPoolSize < corePoolSize ||
-			keepAliveTime < 0){
-				throw new IllegalArgumentException();
-		}
-		if (workQueue == null || threadFactory == null || handler == null){
-			throw new NullPointerException();
-		}
-		//核心线程数
-		this.corePoolSize = corePoolSize;
-        
-         //阻塞队列，一般可以选择：
-         //ArrayBlockingQueue：基于数组的有界阻塞队列
-         //LinkedBlockingQueue：基于链表的阻塞队列，不存在最大值限制
-         //SynchronousQueue：不存储元素的阻塞队列，每个插入操作必须等上一个元素被移除
-         this.workQueue = workQueue;
-        
-         //最大线程数
-		this.maximumPoolSize = maximumPoolSize;
-        
-         //keepAliveTime：线程超时时间
-         //unit：时间单位，常用 MILLISECOND SECONDS MINUTES HOURS DAYS
-		this.keepAliveTime = unit.toNanos(keepAliveTime);
-        
-         //创建新的线程方式
-		this.threadFactory = threadFactory;
-        
-         //任务拒绝处理器
-         //AbortPolicy：丢弃任务，并抛出运行时异常
-         //CallerRunsPolicy：只用调用者所在的线程来处理任务
-         //DiscardOldestPolicy：丢弃阻塞队列中最近的任务，然后执行当前任务
-         //DiscardPolicy：直接丢弃任务，不处理
-		this.handler = rejectedHandler;
-	}
-}
-```
+- corePoolSize：线程池中核心线程数
+- maximumPoolSize：线程池中最大线程数
+- keepAliveTime ：默认是非核心线程超时时长，如果 allowCoreThreadTimeOut(true)，核心线程也会超时
+- TimeUnit：keepAliveTime的单位
+  - NANOSECONDS：1微毫秒 = 1微秒 / 1000
+  - MICROSECONDS：1微秒 = 1毫秒 / 1000
+  - MILLISECONDS：1毫秒 = 1秒 /1000
+  - SECONDS：秒
+  - MINUTES：分
+  - HOURS：小时
+  - DAYS：天
+- workQueue：线程池中的任务队列，常见的队列有以下几种
+  - SynchronousQueue：不存储元素的阻塞队列，每个插入操作必须等上一个元素被移除
+  - LinkedBlockingQueue：基于链表的阻塞队列，不存在最大值限制
+  - ArrayBlockingQueue：基于数组的有界阻塞队列
+  - DelayQueue：队列内元素必须实现Delayed接口
+- threadFactory：创建线程的工厂
+- rejectedHandler：添加任务失败的处理策略，有以下几种
+  - AbortPolicy：丢弃任务，并抛出运行时异常
+  - CallerRunsPolicy：如果线程池没有SHUTODOWN的话，直接执行任务
+  - DiscardOldestPolicy：丢弃阻塞队列中最近的任务，然后执行当前任务
+  - DiscardPolicy：直接丢弃任务，不处理
 
-ThreadPoolExecutor 中常用的成员变量和常量：
+### 生命周期
+
+ThreadPoolExecutor 中通过 AtomicInteger 实例来保存生命周期状态和线程数量。
 
 ```java
 // 低29位表示线程池中线程数，通过高3位表示线程池的运行状态
@@ -985,10 +971,8 @@ private boolean addWorker(Runnable firstTask, boolean core) {
         int c = ctl.get();
         // 获取当前线程状态
         int rs = runStateOf(c);
-        // 如下几种情况，都不会创建新的线程：
-        // 1.线程池状态是 STOP TIDYING TERMINATED 此时不创建新的线程处理任务
-        // 2.线程池状态是 SHUTDOWN & 有新的任务，此时不创建新的线程处理任务，但是仍会执行队列中的任务
-        // 3.线程池状态是 SHUTDOWN & 阻塞队列为空，此时不创建新的线程处理任务。多这个判断是为了防止了SHUTDOWN 状态下没有活动线程了，但是队列里还有任务没执行这种特殊情况，就开启一个新的线程执行任务
+        // 1.线程池状态是STOP TIDYING TERMINATED 线程池拒绝执行任务，也不添加线程
+        // 2.线程池状态是(SHUTDOWN & 没有新任务 & 队列不为空)添加线程处理，非这种情况拒绝执行任务，也不添加线程
         if (rs >= SHUTDOWN &&
             ! (rs == SHUTDOWN &&
                firstTask == null &&
@@ -1151,3 +1135,8 @@ private Runnable getTask() {
 
 [关于Handler 的这 15 个问题，你都清楚吗？ (qq.com)](https://mp.weixin.qq.com/s?__biz=MzAxMTI4MTkwNQ==&mid=2650832447&idx=1&sn=52356ffeb588ae1a27a92a97e171c278&chksm=80b7aaa1b7c023b7356aab3d1848629b84865403fa6ce48fc6220068619f348924823eab9a7e)
 
+[深入理解在Android中线程池的使用_android 线程池workqueue_Da丶的博客-CSDN博客](https://blog.csdn.net/l540675759/article/details/62230562)
+
+[关于线程池的这 8 个问题你都能答上来吗？ (qq.com)](https://mp.weixin.qq.com/s?__biz=MzA5MzI3NjE2MA==&mid=2650247359&idx=1&sn=8e540c2d45b91b057833ec8e7f67ff20&chksm=886361d0bf14e8c6e2cfeb904399f71c88244a18671ff4b433c5f12f8ad57414b3535bacf484)
+
+[一篇能够帮你理清线程池的文章 (qq.com)](https://mp.weixin.qq.com/s?__biz=MzA5MzI3NjE2MA==&mid=2650249794&idx=1&sn=25ff1aedf2c5208fd7d7be44a453eb31&chksm=88636b2dbf14e23b9cabfd52a845d30af55c8cd3dfc33fc1d1e5956a906d412c34202a4eff5c)
