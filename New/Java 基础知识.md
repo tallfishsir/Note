@@ -1263,138 +1263,53 @@ Class，Construct，Method，FIeld，Parameter 对象都可以调用 getModifier
 
 ### 动态代理
 
+Java 的动态代理是基于反射机制完成的，具体来说，Java 动态代理分为两种：基于接口的动态代理和基于类的动态代理。基于接口的动态代理使用的是 Proxy 类，它提供了静态方法用于生成动态代理实例，整体流程可以总结为：
 
-
-
-
-## 动态代理的使用和原理
-
-与动态代理相对应的是静态代理，在我看来，静态代理其实是一种装饰者模式：在真正处理逻辑的对象外部包一层装饰者（代理），以此增加功能。
-
-### 静态代理
+- 实现 InvocationHandler 接口创建自己的调用处理器 
+- 生成接口对应的 Class 对象，Class 对象的构造函数参数是 InvocationHandler 类型
+- 通过反射获取参数是 InvocationHandler 类型的 Constructor 对象
+- 通过反射 Constructor 对象创建动态代理实例
 
 ```java
-// 代理接口
-public interface Subject{
-    void doSomething();
-}
+//使用方式
+Proxy.newProxyInstance(
+    service.getClassLoader(),
+    new Class<?>[] {service},
+    new InvocationHandler() {
+      private final Platform platform = Platform.get();
+      private final Object[] emptyArgs = new Object[0];
+      @Override
+      public @Nullable Object invoke(Object proxy, Method method, @Nullable Object[] args)
+          throws Throwable {
+        if (method.getDeclaringClass() == Object.class) {
+          return method.invoke(this, args);
+        }
+        args = args != null ? args : emptyArgs;
+        return platform.isDefaultMethod(method)
+            ? platform.invokeDefaultMethod(method, service, proxy, args)
+            : method.invoke(subjectImpl, args);;
+      }
+    });
 
-// 真正执行任务的类
-public class RealSubject implements Subject{
-    @Override
-    public void doSomething(){
-        // do something
-	}
-}
-
-// 代理类
-public class ProxySubject implement Subject{
-    // 代理类持有一个委托类的对象引用
-    RealSubject realSubject;
-    public ProxySubject(RealSubject realSubject){
-        this.realSubject = realSubject;
-    }
-    
-    @Override
-    public void doSomething(){
-        // do more something
-        realSubject.doSomething();
-        // do more something
-	}
-}
-
-// 静态代理类工厂 
-public class SubjectFactory{
-    public static Subject getInstance(){
-        return new ProxySubject(new RealSubject);
-    }
-}
-
-// 调用方
-public class Client1 {
-    public static void main(String[] args) {
-        Subject proxy = SubjectStaticFactory.getInstance();
-        proxy.doSomething();
-    }   
-} 
-
-```
-
-静态代理类优缺点 
-优点：业务类只需要关注业务逻辑本身，保证了业务类的重用性。这是代理的共有优点。 
-缺点： 
-
-1. 代理对象的一个接口只服务于一种类型的对象，如果要代理的方法很多，势必要为每一种方法都进行代理。 
-2. 如果接口增加一个方法，除了所有实现类需要实现这个方法外，所有代理类也需要实现此方法。增加了代码维护的复杂度。
-
-### 动态代理
-
-动态代理是在程序运行期间由 JVM 根据反射等机制动态的生成，也就是不需要我们在源码阶段增加 ProxySubject 文件，但相关增加的逻辑还是需要在 invoke() 中添加。
-
-```java
-// 实现InvocationHandler接口创建自己的调用处理器 
-InvocationHandler handler = new InvocationHandlerImpl(...);
-
-// 通过 Proxy 为包括 Subject 接口在内的一组接口动态创建代理类的类对象  
-Class clz = Proxy.getProxyClass(classLoader, new Class[]{Subject.class,...});
-
-// 通过反射从生成的类对象获得构造函数对象  
-Constructor constructor = clz.getConstructor(new Class[]{InvocationHandler.class});
-
-// 通过构造函数对象创建动态代理类实例
-Subject proxySubject = (Subject) constructor.newInstance(new Object[]{handler});
-```
-
-Proxy类的静态方法 newProxyInstance 对上面具体步骤的后三步做了封装，简化了动态代理对象的获取过程。 
-
-```java
-Subject subjectImpl = new SubjectImpl();
-Subject subjectProxy = (Subject) Proxy.newProxyInstance(SubjectImpl.class.getClassLoader(),
-        SubjectImpl.class.getInterfaces(),
-        new InvocationHandler() {
-            @Override
-            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                // do more something
-                method.invoke(subjectImpl, args);
-                // do more something
-                return null;
-            }
-        });
-subjectProxy.doSomething();
-```
-
-### Proxy.newProxyInstance 源码解析
-
-```java
+//Proxy.java
 public static Object newProxyInstance(ClassLoader loader,
                                       Class<?>[] interfaces,
                                       InvocationHandler h)
-    throws IllegalArgumentException {
+    throws IllegalArgumentException
+{
     Objects.requireNonNull(h);
     final Class<?>[] intfs = interfaces.clone();
-    final SecurityManager sm = System.getSecurityManager();
-    if (sm != null) {
-        checkProxyAccess(Reflection.getCallerClass(), loader, intfs);
-    }
-    // 第一步，生成 intfs 接口代理类的类对象
+    
+    //通过classloader加载参数interfaces对应的class对象
     Class<?> cl = getProxyClass0(loader, intfs);
     try {
-        if (sm != null) {
-            checkNewProxyPermission(Reflection.getCallerClass(), cl);
-        }
-        // constructorParams 就是 InvocationHandler.class 对象
-        // 第二步，获取入参是 InvocationHandler 的代理类构造函数
+        //获取参数是InvocationHandler的构造函数
         final Constructor<?> cons = cl.getConstructor(constructorParams);
         final InvocationHandler ih = h;
         if (!Modifier.isPublic(cl.getModifiers())) {
-            AccessController.doPrivileged(new PrivilegedAction<Void>() {
-                public Void run() {
-                    cons.setAccessible(true);
-                    return null;
-                }
-            });
+            cons.setAccessible(true);
         }
-        // 第三步，通过构造函数对象创建动态代理类实例
+        //反射创建动态代理实例
         return cons.newInstance(new Object[]{h});
     } catch (IllegalAccessException|InstantiationException e) {
         throw new InternalError(e.toString(), e);
@@ -1411,144 +1326,113 @@ public static Object newProxyInstance(ClassLoader loader,
 }
 ```
 
-那么这个代理类的类对象是如何生成的就是关键了，它是通过 proxyClassCache 这个对象获取的。
+getProxyClass0() 加载 Class 对象的过程，使用到了 WeakCache，WeakCache 的构造函数中第一个参数 KeyFactory 可以自定义 Key 的样式。WeakCache 内部是通过 ConcurrentMap 和弱引用（Weak Reference）来缓存数据，因此 WeakCache 的特点如下：
+
+- 存储的数据使用弱引用引用，不需要手动清除，避免内存泄漏
+
+- 数据存储方式是线程安全的，可以在多线程环境下使用
+
+proxyClassCache 如果没有缓存对应的 Class 对象，就会调用 ProxyClassFactory.apply() 生成 Class 对象。
 
 ```java
-private static Class<?> getProxyClass0(ClassLoader loader, Class<?>... interfaces) {
+//Proxy.java
+private static final WeakCache<ClassLoader, Class<?>[], Class<?>>
+    proxyClassCache = new WeakCache<>(new KeyFactory(), new ProxyClassFactory());
+
+private static final class KeyFactory
+    implements BiFunction<ClassLoader, Class<?>[], Object> {
+    @Override
+    public Object apply(ClassLoader classLoader, Class<?>[] interfaces) {
+        switch (interfaces.length) {
+            case 1: return new Key1(interfaces[0]); 
+            case 2: return new Key2(interfaces[0], interfaces[1]);
+            case 0: return key0;
+            default: return new KeyX(interfaces);
+        }
+    }
+}
+
+private static Class<?> getProxyClass0(ClassLoader loader,
+                                       Class<?>... interfaces) {
     if (interfaces.length > 65535) {
         throw new IllegalArgumentException("interface limit exceeded");
     }
     return proxyClassCache.get(loader, interfaces);
 }
-```
 
-proxyClassCache 是一个 WeakCache 对象，其中 map 是最重要的成员变量，从本质来看，map 的第一层 key 是 ClassLoader，第二层 key 是 interface，由此来缓存某个 Factory 对象。proxyClassCache 的 get 方法返回 ProxyClassFactory.apply 的返回值，返回值实际上最终是通过 ProxyGenerator.generateProxyClass( proxyName, interfaces, accessFlags) 来生成最后的代理类。
-
-```java
-final class WeakCache<K, P, V> {
-    private final ConcurrentMap<Object, ConcurrentMap<Object, Supplier<V>>> map
-    = new ConcurrentHashMap<>();
-    
-    public WeakCache(BiFunction<K, P, ?> subKeyFactory, BiFunction<K, P, V> valueFactory) {
-        this.subKeyFactory = Objects.requireNonNull(subKeyFactory);
-        this.valueFactory = Objects.requireNonNull(valueFactory);
-    }
-    
-    public V get(K key, P parameter) {
-        Objects.requireNonNull(parameter);
-        expungeStaleEntries();
-        //获取第一层的key，是一个继承WeakReference的CacheKey对象，CacheKey对象包含了classLoader和ReferenceQueue两个成员
-        Object cacheKey = CacheKey.valueOf(key, refQueue);
-        // 通过 classLoader 拿到第一层的 value
-        ConcurrentMap<Object, Supplier<V>> valuesMap = map.get(cacheKey);
-        // 如果 value 没有就创建一个
-        if (valuesMap == null) {
-            ConcurrentMap<Object, Supplier<V>> oldValuesMap = map.putIfAbsent(cacheKey, valuesMap = new ConcurrentHashMap<>());
-            if (oldValuesMap != null) {
-                valuesMap = oldValuesMap;
-            }
-        }
-        // 这里关键，subKeyFactory 是在前面构造函数中赋值的，而调用它的构造函数发生在 Proxy.class 中：
-        // private static final WeakCache<ClassLoader, Class<?>[], Class<?>>
-        // proxyClassCache = new WeakCache<>(new KeyFactory(), new ProxyClassFactory());
-        // KeyFactory.apply 实际上就是就是根据 classLoader 和 interface 生成第二层的 key
-        Object subKey = Objects.requireNonNull(subKeyFactory.apply(key, parameter));
-        // 拿到第二层的 value，supplier对象
-        Supplier<V> supplier = valuesMap.get(subKey);
-        Factory factory = null;
-
-        while (true) {
-            if (supplier != null) {
-                // 后面的分析会得到 supplier 实际上是 Factory 对象
-                // Factory.get() 方法最后返回的其实是 ProxyClassFactory.apply()
-                V value = supplier.get();
-                if (value != null) {
-                    return value;
-                }
-            }
-            if (factory == null) {
-                factory = new Factory(key, parameter, subKey, valuesMap);
-            }
-            // valuesMap 第二层的 value 实际上是一个 Factory 对象
-            if (supplier == null) {
-                supplier = valuesMap.putIfAbsent(subKey, factory);
-                if (supplier == null) {
-                    supplier = factory;
-                }
-            } else {
-                if (valuesMap.replace(subKey, supplier, factory)) {
-                    supplier = factory;
-                } else {
-                    supplier = valuesMap.get(subKey);
-                }
-            }
-        }
-    }
+private static final class ProxyClassFactory
+    implements BiFunction<ClassLoader, Class<?>[], Class<?>> {
+	@Override
+	public Class<?> apply(ClassLoader loader, Class<?>[] interfaces) {
+		Map<Class<?>, Boolean> interfaceSet = new IdentityHashMap<>(interfaces.length);
+		for (Class<?> intf : interfaces) {
+			Class<?> interfaceClass = null;
+			try {
+                 //创建Classs对象
+				interfaceClass = Class.forName(intf.getName(), false, loader);
+			} catch (ClassNotFoundException e) {
+			}
+			if (interfaceClass != intf) {
+				throw new IllegalArgumentException(
+					intf + " is not visible from class loader");
+			}
+			//检查是否是接口
+			if (!interfaceClass.isInterface()) {
+				throw new IllegalArgumentException(
+					interfaceClass.getName() + " is not an interface");
+			}
+			//检查是否重复
+			if (interfaceSet.put(interfaceClass, Boolean.TRUE) != null) {
+				throw new IllegalArgumentException(
+					"repeated interface: " + interfaceClass.getName());
+			}
+		}
+		String proxyPkg = null;     
+		int accessFlags = Modifier.PUBLIC | Modifier.FINAL;
+		//设置代理类具有 final 和 public 修饰符
+		for (Class<?> intf : interfaces) {
+			int flags = intf.getModifiers();
+			if (!Modifier.isPublic(flags)) {
+				accessFlags = Modifier.FINAL;
+				String name = intf.getName();
+				int n = name.lastIndexOf('.');
+				String pkg = ((n == -1) ? "" : name.substring(0, n + 1));
+				if (proxyPkg == null) {
+					proxyPkg = pkg;
+				} else if (!pkg.equals(proxyPkg)) {
+					throw new IllegalArgumentException(
+						"non-public interfaces from different packages");
+				}
+			}
+		}
+		if (proxyPkg == null) {
+			proxyPkg = "";
+		}
+		{
+			List<Method> methods = getMethods(interfaces);
+			Collections.sort(methods, ORDER_BY_SIGNATURE_AND_SUBTYPE);
+			validateReturnTypes(methods);
+			List<Class<?>[]> exceptions = deduplicateAndGetExceptions(methods);
+			Method[] methodsArray = methods.toArray(new Method[methods.size()]);
+			Class<?>[][] exceptionsArray = exceptions.toArray(new Class<?>[exceptions.size()][]);
+			long num = nextUniqueNumber.getAndIncrement();
+             //生成唯一的代理类名称：包名+$Proxy+Int数量
+			String proxyName = proxyPkg + proxyClassNamePrefix + num;
+             //native方法，生成Class对象，构造函数参数是 InvocationHandler 类型
+			return generateProxy(proxyName, interfaces, loader, methodsArray,
+								exceptionsArray);
+		}
+	}
 }
 ```
 
-到此，WeakCache.get 方法返回的实际上是 ProxyClassFactory.apply() 的返回值，也就是说，代理类是在这个方法中生成的。
+动态代理生成的代理类本身有一些特点：
 
-```java
-public Class<?> apply(ClassLoader loader, Class<?>[] interfaces) {
-    Map<Class<?>, Boolean> interfaceSet = new IdentityHashMap<>(interfaces.length);
-    // 验证 interface 的合法性
-    for (Class<?> intf : interfaces) {
-        Class<?> interfaceClass = null;
-        try {
-            interfaceClass = Class.forName(intf.getName(), false, loader);
-        } catch (ClassNotFoundException e) {
-        }
-        if (interfaceClass != intf) {
-            throw new IllegalArgumentException(intf + " is not visible from class loader");
-        }
-        if (!interfaceClass.isInterface()) {
-            throw new IllegalArgumentException(interfaceClass.getName() + " is not an interface");
-        }
-        if (interfaceSet.put(interfaceClass, Boolean.TRUE) != null) {
-            throw new IllegalArgumentException("repeated interface: " + interfaceClass.getName());
-        }
-    }
-    // 生成包名
-    String proxyPkg = null; 
-    int accessFlags = Modifier.PUBLIC | Modifier.FINAL;
-    for (Class<?> intf : interfaces) {
-        int flags = intf.getModifiers();
-        if (!Modifier.isPublic(flags)) {
-            accessFlags = Modifier.FINAL;
-            String name = intf.getName();
-            int n = name.lastIndexOf('.');
-            String pkg = ((n == -1) ? "" : name.substring(0, n + 1));
-            if (proxyPkg == null) {
-                proxyPkg = pkg;
-            } else if (!pkg.equals(proxyPkg)) {
-                throw new IllegalArgumentException("non-public interfaces from different packages");
-            }
-        }
-    }
-    if (proxyPkg == null) {
-        proxyPkg = ReflectUtil.PROXY_PACKAGE + ".";
-    }
-    /*
-     * 生成类名
-     */
-    long num = nextUniqueNumber.getAndIncrement();
-    String proxyName = proxyPkg + proxyClassNamePrefix + num;
-    /*
-     * 最关键一步，生成 代理类
-     */
-    byte[] proxyClassFile = ProxyGenerator.generateProxyClass( proxyName, interfaces, accessFlags);
-    try {
-        return defineClass0(loader, proxyName, proxyClassFile, 0, proxyClassFile.length);
-    } catch (ClassFormatError e) {
-        throw new IllegalArgumentException(e.toString());
-    }
-}
-```
-
-生成的 Proxy 类是实现了 interfaces 的方法的，并且在每个方法中都调用了 InvocationHandler.invoke 方法。
-
-
+- 如果所代理的接口都是 public 的，它将被定义在顶层包，即包路径为空
+- 如果所代理的接口中有非 public 的接口，它将被定义在该接口所在包
+- 类修饰符具有 final 和 public 修饰符
+- 类名：格式是“$ProxyN”，其中 N 是一个逐一递增数字，代表 Proxy 类第 N 次生成的动态代理类
+- Object 的三个方法 hashCode，equals 和 toString 也会被分派到代理类的 invoke 方法执行
 
 
 
@@ -1579,3 +1463,7 @@ public Class<?> apply(ClassLoader loader, Class<?>[] interfaces) {
 [Java 基础 - 注解机制详解 | Java 全栈知识体系 (pdai.tech)](https://pdai.tech/md/java/basic/java-basic-x-annotation.html)
 
 [Java 基础 - 反射机制详解 | Java 全栈知识体系 (pdai.tech)](https://pdai.tech/md/java/basic/java-basic-x-reflection.html)
+
+[都了解retrofit背后是动态代理，那动态代理的背后是？ (qq.com)](https://mp.weixin.qq.com/s/DMnYWXVx0Gf3Mjs38pfOiA)
+
+[动态代理与静态代理区别_ikownyou的博客-CSDN博客](https://blog.csdn.net/ikownyou/article/details/53081426)
