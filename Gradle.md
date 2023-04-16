@@ -1,4 +1,11 @@
+以下是Gradle构建系统在Android项目中的一些关键概念：
 
+1. Project：一个Project对应一个构建文件（如build.gradle）。它表示一个可以构建的实体，例如一个Android应用程序或库模块。一个Project可以包含多个子项目（subprojects），这些子项目也会有自己的构建文件。一个Android工程通常至少包含一个应用模块，它是一个Project。
+2. Task：Task是Gradle构建系统中的最基本的单位，它表示一个具体的操作，例如编译Java代码、合并资源文件或生成APK。每个Task可以依赖其他Task，并在执行时按照定义的顺序执行。
+3. Build.gradle：这是Gradle构建系统的配置文件。一个Android项目通常有两个build.gradle文件：一个位于项目根目录，称为项目级别（Project-level）的build.gradle；另一个位于应用模块（如app模块）目录下，称为模块级别（Module-level）的build.gradle。项目级别的build.gradle文件主要用于配置整个项目的构建设置，如Gradle插件的版本信息。模块级别的build.gradle文件主要用于配置具体模块的构建设置，如依赖库、最小SDK版本、目标SDK版本等。
+4. Gradle Wrapper：Gradle Wrapper是一个可执行的脚本，它包装了Gradle构建工具，允许开发者在没有安装Gradle的情况下构建项目。Gradle Wrapper会在构建时自动下载和安装合适版本的Gradle。这确保了在不同开发环境下，项目都使用相同版本的Gradle构建。
+5. Plugin：Gradle插件扩展了Gradle构建系统的功能。Android开发中最常用的插件是Android Gradle Plugin，它提供了许多与Android构建相关的特性，例如构建APK、生成签名、混淆代码等。
+6. Dependency：依赖是一个项目所需的外部库或模块。在Android项目中，开发者通常需要添加许多依赖库，例如Android Support Library、Retrofit、Glide等。Gradle管理这些依赖，确保它们在构建过程中被正确地添加到项目中。
 
 ### Gradle 任务
 
