@@ -454,7 +454,7 @@ doLast
 
 ### Android Plugin
 
-Plugin：Gradle插件扩展了Gradle构建系统的功能。Android开发中最常用的插件是Android Gradle Plugin，它提供了许多与Android构建相关的特性，例如构建APK、生成签名、混淆代码等
+Plugin 扩展了 Gradle 构建系统的功能，Android 开发中最常用的插件是 Android Gradle Plugin，它提供了许多与Android 构建相关的特性，例如构建APK、生成签名、混淆代码等
 
 #### 类型
 

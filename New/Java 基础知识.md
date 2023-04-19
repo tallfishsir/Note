@@ -1113,8 +1113,8 @@ Java 反射允许在运行过程中访问、检查、修改自身的结构和行
 获取 Class 对象的方法有以下几种：
 
 - Class.forName(String name)：调用 Class 的静态方法传入类的完全限定名，加载 Class 对象
-- .class：直接使用 类名.class 获取 Class 对象
-- Object.getClass()：使用对象的 getClass() 方法获取 Class 对象
+- 类名.class：直接使用 类名.class 获取 Class 对象
+- 对象.getClass()：使用对象的 getClass() 方法获取 Class 对象
 
 Class.forName() 方法适用于动态加载类的场景，可能抛出 ClassNotFoundException；.class 语法适用于已知类型，编译时就可以确定，不会抛出异常；getClass() 方法适用于已有对象实例的情况。
 
