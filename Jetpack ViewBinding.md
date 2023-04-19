@@ -125,7 +125,7 @@ public final class ActivityTestBinding implements ViewBinding {
 
 ## 委托封装
 
-在 Activity/Fragment 中使用 View Binding 需要编写样板代码，特别是 Fragment 中 ViewBinding 的实例是可空可变的，使用起来不方便
+在 Activity/Fragment 中使用 ViewBinding 需要编写样板代码，特别是 Fragment 中 ViewBinding 的实例是可空可变的，使用起来不方便
 
 ```kotlin
 inline fun <Component : Any, V : ViewBinding> viewBindings(

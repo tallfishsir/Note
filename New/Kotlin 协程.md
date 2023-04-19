@@ -946,6 +946,86 @@ internal actual class SafeCollector<T> actual constructor(
 
 总结以上，下游的传入的 FlowCollector 对象(collect {})，经过封装后，在上游(Flow{})内部调用 emit() 传入数据。对于添加了多层操作符的流程来说，调用中间操作符filter{}会创建出新的Flow对象，而且会对数据重新进行发射。
 
+#### StateFlow 
+
+StateFlow 是一个可观察数据可响应流，可以向其收集器发出当前状态更新。与 LiveData 的功能相似，与 Flow 相比，它多出了更新数据内容的功能。使用 StateFlow 一般分为三步：
+
+- 创建 MutableStateFlow 对象并设置初始默认值
+- 调用 collect() )收集数据流
+- MutableStateFlow  调用 setValue() 修改数据，引起 collect 内的影响
+
+```kotlin
+runBlocking {
+    val selected = MutableStateFlow<String>("init")
+    launch {
+        selected.collect{
+            println("MutableStateFlow Received value: $it")
+        }
+    }
+    delay(1000L)
+    selected.value = "changed"
+}
+```
+
+需要注意的是，StateFlow 不会自动处理生命周期，因此需要配合 LifecycleCOroutineScope 或launchWhenStarted、launchWhenResumed、launchWhenCreated 等扩展函数来确保在正确的生命周期范围内收集数据。
+
+#### ShareFlow
+
+ShareFlow 也是一个可观察数据可响应流，和 StateFlow 类似，都可以用来存储状态。而且它还可以将已经发送过的数据发送新的订阅者。使用 ShareFlow 一般分为三步：
+
+- 创建一个 MutableSharedFlow，配置参数
+- 使用 emit() 或者 tryEmit() 发送数据
+- 调用 collect() 数据流
+
+```kotlin
+val selected = MutableSharedFlow<Int>(3, 6, BufferOverflow.DROP_OLDEST)
+launch {
+    for (i in 0..10) {
+        selected.tryEmit(i)
+    }
+}
+selected.collect {
+    println("MutableSharedFlow Received value: $it")
+}
+```
+
+MutableSharedFlow 构造函数三个参数的含义：
+
+- replay：当新的订阅者 collect 时，发送几个已经发送过的数据给它
+- extraBufferCapacity：减去replay，MutableSharedFlow 还缓存多少数据
+- onBufferOverflow：缓存策略，SUSPEND(丢弃最旧值并挂起)、DROP_OLDEST(丢弃最旧值)、DROP_LATEST(丢弃最新值)
+
+```
+public fun <T> MutableSharedFlow(
+    replay: Int = 0,
+    extraBufferCapacity: Int = 0,
+    onBufferOverflow: BufferOverflow = BufferOverflow.SUSPEND
+): MutableSharedFlow<T> 
+```
+
+MutableSharedFlow 发送数据时，当缓存数据量超过阈值，以下两中发送方法处理方式会不一样：
+
+- emit：当缓存策略为 BufferOverflow.SUSPEND 时，emit 方法会挂起，直到有新的缓存空间。
+- tryEmit：tryEmit 会返回一个 Boolean 值，true 代表传递成功，false 代表会产生一个回调，让这次数据发射挂起，直到有新的缓存空间。
+
+如果想要将 Flow 转为 SharedFlow，可以使用扩展方法 Flow.shareIn()，第三个参数启动方式 started  提供了三种策略：
+
+- SharingStarted.WhileSubscribed()：存在订阅者时，将使上游提供方保持活跃状态
+- SharingStarted.Eagerly：立即启动提供方
+- SharingStarted.Lazily：在第一个订阅者出现后开始共享数据，并使数据流永远保持活跃状态
+
+```kotlin
+val latestNews: Flow<List<ArticleHeadline>> = flow {
+    ...
+}.shareIn(
+    externalScope,
+    replay = 1,
+    started = SharingStarted.WhileSubscribed() // 启动政策
+)
+```
+
+
+
 
 
 [揭秘Kotlin协程中的CoroutineContext (qq.com)](https://mp.weixin.qq.com/s?__biz=MzA5MzI3NjE2MA==&mid=2650255071&idx=1&sn=03e3c9b1157b8f277d519e61b18a9946&chksm=88635fb0bf14d6a67f7901ffac8a7f544b752fb63adc6c9e5e042d610e9ca8d05ec3c2750bfe)
