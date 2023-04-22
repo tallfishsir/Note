@@ -1,4 +1,4 @@
-# Window
+# Android Window
 
 Android 的 Window 机制就为了解决屏幕上 View 的显示混乱问题，让所有的 View 都按照秩序来显示，满足开发需求。Window 是一个抽象的概念，是 Window 机制中的操作单位，每一个 Window 对应一个 View 树。
 

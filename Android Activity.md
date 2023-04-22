@@ -1,4 +1,151 @@
-#  Activity 启动过程
+#  Android Activity
+
+## AIDL 使用过程
+
+Android 中实现进程间通信方式最多的就是 AIDL，当我们定义好 AIDL 文件，IDE 会在编译期间生成 IPC 的 Java 文件，这个 Java 文件包含了一个 Stub 静态的抽象类和一个 Proxy 静态类，Proxy 是 Stub 的静态内部类。实际上，可以手动编码实现跨进程通信。
+
+手动编码实现之前，需要先了解一些类或者接口的含义：
+
+- IInterface：代表 Server 进程对象能够提供什么方法，对应的就是 AIDL 文件中定义的接口
+- IBinder：代表一种跨进程通信能力的接口，只要实现了这个接口，这个对象就能跨进程传输
+- Binder：Java 层的 Binder 类，代表 Binder 本地对象，继承自 IBinder
+
+首先定义 Server 进程能够提供的方法
+
+```java
+public interface IBookManager extends IInterface {
+    // Binder 的唯一标识，一般用当前类名表示
+    static final String DESCRIPTOR = "com.tallfish.demo.binder.book.IBookManager";
+    // Server 提供的方法和方法 id
+    static final int TRANSACTION_getBookList = IBinder.FIRST_CALL_TRANSACTION + 0;
+    static final int TRANSACTION_addBook = IBinder.FIRST_CALL_TRANSACTION + 1;
+    public List<Book> getBookList() throws RemoteException;
+    public void addBook(Book book) throws RemoteException;
+}
+```
+
+然后实现 Binder 类
+
+```java
+public class BookManagerImplBinder extends Binder implements IBookManager {
+    public BookManagerImpl() {
+        this.attachInterface(this, DESCRIPTOR);
+    }
+    // 用于将服务端的 Binder 对象转换成客户端所需要的 AIDL 接口类型的对象
+    // 这种转换过程区分进程
+    // 客户端服务端同一进程，此方法返回的 BookManagerImplBinder 对象本身
+    // 客户端服务端不在同一进程，此方法返回的是系统封装后的 BookManagerImplBinder.Proxy 对象
+    public static IBookManager asInterface(IBinder obj) {
+        if (obj == null) {
+            return null;
+        }
+        android.os.IInterface iInterface = obj.queryLocalInterface(DESCRIPTOR);
+        if (iInterface != null && iInterface instanceof IBookManager) {
+            return (IBookManager) iInterface;
+        }
+        return new BookManagerImplBinder.Proxy(obj);
+    }
+    // 返回当前的 Binder 对象
+    @Override
+    public IBinder asBinder() {
+        return this;
+    }
+    // 方法运行在服务端中的 Binder 线程池，当客户端跨进程请求时，请求会被系统底层封装后交此方法处理
+    // 服务端根据 code 确定客户端所请求的目标方法是什么
+    // 从 data 中取出目标方法需要的参数
+    // 目标方法执行后，向 reply 写入返回值
+    // 如果方法返回 true 请求成功，false 请求失败
+    @Override
+    protected boolean onTransact(int code, @NonNull Parcel data, @Nullable Parcel reply, int flags) throws RemoteException {
+        switch (code) {
+            case INTERFACE_TRANSACTION:
+                reply.writeString(DESCRIPTOR);
+                break;
+            case TRANSACTION_getBookList:
+                data.enforceInterface(DESCRIPTOR);
+                List<Book> list = this.getBookList();
+                reply.writeNoException();
+                reply.writeTypedList(list);
+                return true;
+            case TRANSACTION_addBook:
+                data.enforceInterface(DESCRIPTOR);
+                Book book;
+                if (0 != data.readInt()) {
+                    book = (Book) Book.CREATOR.createFromParcel(data);
+                } else {
+                    book = null;
+                }
+                this.addBook(book);
+                reply.writeNoException();
+                return true;
+            default:
+        }
+        return super.onTransact(code, data, reply, flags);
+    }
+    // Server 真正实现功能的方法
+    @Override
+    public List<Book> getBookList() throws RemoteException {
+        return null;
+    }
+    // Server 真正实现功能的方法
+    @Override
+    public void addBook(Book book) throws RemoteException {
+    }
+    // Client 获取到的 Binder
+    private static class Proxy implements IBookManager{
+        private IBinder mRemote;
+        public Proxy(IBinder mRemote) {
+            this.mRemote = mRemote;
+        }
+        @Override
+        public IBinder asBinder() {
+            return mRemote;
+        }
+        public java.lang.String getInterfaceDescriptor() {
+            return DESCRIPTOR;
+        }
+        // 方法运行在客户端，当客户端远程调用此方法时，
+        // 将 参数data 出参reply 返回值 创建
+        // 然后调用 transact 方法（此方法会调用到 onTransact） 同时线程挂起直到远程调用结束
+        @Override
+        public List<Book> getBookList() throws RemoteException {
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            List<Book> list;
+            try {
+                data.writeInterfaceToken(DESCRIPTOR);
+                mRemote.transact(TRANSACTION_getBookList, data, reply, 0);
+                reply.readException();
+                list = reply.createTypedArrayList(Book.CREATOR);
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+            return list;
+        }
+
+        @Override
+        public void addBook(Book book) throws RemoteException {
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(DESCRIPTOR);
+                if (book != null) {
+                    data.writeInt(1);
+                    book.writeToParcel(data, 0);
+                } else {
+                    data.writeInt(0);
+                }
+                mRemote.transact(TRANSACTION_addBook, data, reply, 0);
+                reply.readException();
+            } finally {
+                data.recycle();
+                reply.recycle();
+            }
+        }
+    }
+}
+```
 
 ## 系统启动流程
 
@@ -13,6 +160,8 @@ system_server 进程承载了 framework 层的核心业务，启动过程中启�
 AMS 的启动过程 systemReady() 中，会通过 ActivityTaskManagerService 获取控制器，启动 Launcher。
 
 ![image-20221019220055901](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\image-20221019220055901.png)
+
+## Activity 跳转方法
 
 ## 页面跳转代码分析
 
@@ -462,32 +611,6 @@ private void performDraw() {
     draw(fullRedrawNeeded);
 }
 ```
-
-## Activity 跳转流程相关类和对象
-
-### Looper
-
-见 Handler.md
-
-### ViewRootImpl
-
-见 Window.md
-
-### Context
-
-Context 体系的继承关系：
-
-- Context 是抽象类，提供了应用环境全局信息的接口
-- ContextWrapper 是上下文功能的封装类
-- ContextImpl 是上下文功能的实现类
-
-Applicaiton 和 Service 直接继承自 ContextWrapper 类，Activity 继承自 ContextThemeWrapper 类，因为 Activity 提供 UI 显示，需要有主题。应用的 Context 数量 = Activity 数量 + Service 数量 + 1（Application 数量）
-
-ContextWrapper 包含一个真正的 ContextImpl 的引用 mBase，然后就是 ContextImpl 的装饰者模式。
-
-Application 的 ContextImpl 对象是在 performLaunchActivity() 方法中创建的。
-
-Activity 的 ContextImpl 对象是在 Activity.attach() 方法中，由 Application 的 ContextImpl 对象传入的。
 
 
 
