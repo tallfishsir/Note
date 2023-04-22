@@ -973,7 +973,7 @@ runBlocking {
 
 ShareFlow 也是一个可观察数据可响应流，和 StateFlow 类似，都可以用来存储状态。而且它还可以将已经发送过的数据发送新的订阅者。使用 ShareFlow 一般分为三步：
 
-- 创建一个 MutableSharedFlow，配置参数
+- 创建一个 MutableSharedFlow 对象并配置参数
 - 使用 emit() 或者 tryEmit() 发送数据
 - 调用 collect() 数据流
 

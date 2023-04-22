@@ -437,7 +437,7 @@ MutableLiveData 是 LiveData 的子类，它允许更改和更新数据。Mutabl
 
 在实际应用中，通常会在 ViewModel 内部使用 MutableLiveData 来存储和管理数据，然后将其作为 LiveData 对象对外暴露给 UI 组件（如 Activity 和 Fragment）。这样可以确保数据的封装性和不可变性，防止外部组件意外地修改数据。
 
-```
+```kotlin
 class MyViewModel : ViewModel() {
     private val _data = MutableLiveData<String>()
     val data: LiveData<String> get() = _data
@@ -468,7 +468,7 @@ class MyActivity : AppCompatActivity() {
 
         viewModel = ViewModelProvider(this).get(MyViewModel::class.java)
         lifecycleScope.launchWhenStarted {
-            viewModel.data.collect { newData ->
+            viewModel.data.observe(this@MyActivity) { newData ->
 		   }
         }
         
