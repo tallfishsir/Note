@@ -1,6 +1,34 @@
 #  Android Activity
 
-## AIDL 使用过程
+## 跨进程通信
+
+### Binder 机制
+
+Binder 是 Android 系统中一种跨进程通信（IPC, Inter-Process Communication）机制。它允许不同进程之间相互通信、调用和共享数据。Binder 机制基于客户端-服务端（Client-Server）架构，允许一个进程（客户端）请求另一个进程（服务端）提供的服务。以下是 Binder 机制的原理和关键组成部分：
+
+- Binder 驱动程序：
+  Binder 机制的底层实现是基于 Linux 内核中的 Binder 驱动程序。Binder 驱动程序负责管理进程之间的通信，确保数据在进程间正确传输。Android 应用程序通过打开 /dev/binder 设备文件来与 Binder 驱动程序交互。
+
+- Binder 代理（Proxy）：
+  Binder 代理是客户端进程中的一个 Java 对象，它实现了服务端提供的接口。客户端通过调用 Binder 代理的方法来实现对服务端的远程调用。Binder 代理会将调用的方法和参数封装成一个 Parcel 对象，并通过 Binder 驱动程序将其发送给服务端进程。
+
+- Binder 对象：
+  Binder 对象位于服务端进程中，它也实现了服务端提供的接口。当服务端接收到客户端的远程调用请求时，Binder 对象会根据请求中的方法和参数执行相应的操作，并将结果返回给客户端。
+
+- ServiceManager：
+  ServiceManager 是 Android 系统中的一个核心服务，负责管理所有的系统服务和自定义服务。当服务端进程启动时，它会将自己的 Binder 对象注册到 ServiceManager。客户端进程在向服务端发起远程调用前，需要先从 ServiceManager 获取服务端的 Binder 代理对象。
+
+- AIDL（Android Interface Definition Language）：
+  AIDL 是一种定义 Android IPC 接口的语言。通过 AIDL 文件，开发者可以定义跨进程通信时所需的接口和数据类型。AIDL 编译器会根据 AIDL 文件生成对应的 Java 接口文件和实现文件，供客户端和服务端使用。
+
+Binder IPC 是通过内存映射 (mmap) 实现的，一次完整的 Binder IPC 通信过程是这样的：
+
+- Binder 驱动在内核空间创建一个「数据接收缓冲区」和一个「内核缓冲区」
+- 建立「数据接收缓冲区」和「内核缓冲区」的内存映射关系
+- 建立「数据接收缓冲区」和「接收进程用户空间地址」的内存映射关系
+- 发送方进程调用 copyfromuser() 将数据拷贝到「内核缓冲区」
+
+### AIDL 使用过程
 
 Android 中实现进程间通信方式最多的就是 AIDL，当我们定义好 AIDL 文件，IDE 会在编译期间生成 IPC 的 Java 文件，这个 Java 文件包含了一个 Stub 静态的抽象类和一个 Proxy 静态类，Proxy 是 Stub 的静态内部类。实际上，可以手动编码实现跨进程通信。
 
@@ -161,9 +189,7 @@ AMS 的启动过程 systemReady() 中，会通过 ActivityTaskManagerService 获
 
 ![image-20221019220055901](C:\Users\24594\AppData\Roaming\Typora\typora-user-images\image-20221019220055901.png)
 
-## Activity 跳转方法
-
-## 页面跳转代码分析
+## Activity 跳转源码
 
 ![](https://upload-images.jianshu.io/upload_images/1869462-882b8e0470adf85a.jpg)
 
@@ -611,6 +637,20 @@ private void performDraw() {
     draw(fullRedrawNeeded);
 }
 ```
+
+## 序列化
+
+Parcelable 和 Serializable 都是用于在 Android 中传递对象的方法。它们之间的主要区别在于性能和实现方式。以下是它们之间的一些区别：
+
+Parcelable 在性能上优于 Serializable，尤其是在内存使用和处理速度方面。Parcelable 是 Android 专门为传递数据对象而设计的接口，它的实现方式直接将数据对象的属性写入字节流，避免了创建额外的对象。而 Serializable 是 Java 标准序列化接口，它使用反射机制来序列化和反序列化对象，可能会创建额外的临时对象，从而导致更高的内存开销和更慢的处理速度。
+
+实现 Parcelable 接口相对复杂一些。需要手动实现对象序列化和反序列化的过程，包括编写 writeToParcel() 方法和一个特殊的构造函数。此外，还需要实现一个名为 CREATOR 的静态变量，用于创建新对象和数组。
+
+实现 Serializable 接口相对简单，只需要让类实现 Serializable 接口即可。如果类中的所有属性都是可序列化的，那么不需要编写任何额外的代码。但是，如果类中包含不可序列化的属性，需要在类中声明 transient 关键字来标记这些属性，使其在序列化过程中被忽略。
+
+在 Android 中，Parcelable 通常用于在不同组件（如 Activity、Service 等）之间传递数据对象。由于其优秀的性能表现，它是 Android 推荐的对象传递方式。
+
+Serializable 更适用于跨平台的对象序列化，如将对象存储到磁盘或通过网络发送到其他平台。但由于其性能较差，不推荐在 Android 中频繁使用。
 
 
 

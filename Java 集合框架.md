@@ -645,10 +645,158 @@ final Node<K,V>[] resize() {
 }
 ```
 
-## Set
+## LInkedHashMap
 
-Set 接口定义的是一个不允许重复的无序集合，具体实现 Set 接口的实现类有：HashSet、LinkedHashSet、TreeSet：
+LinkedHashMap 是一个继承自 HashMap 的哈希表实现，它在哈希表的基础上维护了一个双向链表，用于保持元素的插入顺序或访问顺序。这使得迭代时可以按照顺序访问元素。
 
-- HashSet：内部通过 HashMap 实现，键值对中的值是一个 new Object() 对象
-- LInkedHashSet：内部通过 LinkedHashMap 实现，键值对中的值是一个 new Object() 对象
-- TreeSet：内部通过 TreeMap 实现，键值对中的值是一个 new Object() 对象
+```java
+static class LinkedHashMapEntry<K,V> extends HashMap.Node<K,V> {
+    //增加before和after节点
+    LinkedHashMapEntry<K,V> before, after;
+    LinkedHashMapEntry(int hash, K key, V value, Node<K,V> next) {
+        super(hash, key, value, next);
+    }
+}
+```
+
+LinkedHashMap 支持两种顺序：插入顺序和访问顺序。
+
+- 插入顺序是指按照元素被添加到哈希表中的顺序进行排序
+- 访问顺序是指按照元素被访问的顺序进行排序。当以访问顺序构建 LinkedHashMap 时，每次访问一个元素，这个元素都会被移到链表的末尾
+
+LinkedHashMap并没有重写 put/get 方法，但是其重写了 afterNodeAccess() 用于设置 after 和 before 节点
+
+```java
+void afterNodeAccess(Node<K,V> e) { // move node to last
+    LinkedHashMapEntry<K,V> last;
+    if (accessOrder && (last = tail) != e) {
+        LinkedHashMapEntry<K,V> p =
+            (LinkedHashMapEntry<K,V>)e, b = p.before, a = p.after;
+        p.after = null;
+        if (b == null)
+            head = a;
+        else
+            b.after = a;
+        if (a != null)
+            a.before = b;
+        else
+            last = b;
+        if (last == null)
+            head = p;
+        else {
+            p.before = last;
+            last.after = p;
+        }
+        tail = p;
+        ++modCount;
+    }
+}
+```
+
+LinkedHashMap 可以方便地用于实现 LRU（Least Recently Used，最近最少使用）缓存策略。通过重写 removeEldestEntry 方法，当前长度> 缓存长度时返回true，即可在达到缓存容量限制时自动移除链表头部的最老元素。
+
+## SparseArray
+
+SparseArray 是 Android 框架提供的一个轻量级的数据结构，用于替代 HashMap<Integer, Object>。它用两个单独的数组来存储 key 和 values，并对键数组进行排序以实现二分查找。
+
+```java
+public class SparseArray<E> implements Cloneable {
+    private static final Object DELETED = new Object();
+    private boolean mGarbage = false;
+
+    private int[] mKeys;
+    private Object[] mValues;
+    private int mSize;
+    ......
+}
+```
+
+### 删除
+
+SparseArray 提供了 2 种删除方式，通过二分查找找到对应元素下标，删除只是将待删除元素标记为 DELETED，然后将 mGarbage 设置为 true，然后在 gc 过程中完成删除元素的过程。
+
+```java
+public void delete(int key) {
+    int i = ContainerHelpers.binarySearch(mKeys, mSize, key);
+    if (i >= 0) {
+        if (mValues[i] != DELETED) {
+            mValues[i] = DELETED;
+            mGarbage = true;
+        }
+    }
+}
+
+public void removeAt(int index) {
+    if (index >= mSize && UtilConfig.sThrowExceptionForUpperArrayOutOfBounds) {
+        throw new ArrayIndexOutOfBoundsException(index);
+    }
+    if (mValues[index] != DELETED) {
+        mValues[index] = DELETED;
+        mGarbage = true;
+    }
+}
+```
+
+### 添加
+
+put() 方法主要做了以下操作：
+
+- 通过二分查找在 mKeys 数组中查找对应的 key
+- 查找成功则直接更新 key 对应的 value，而且不返回旧值
+- 如果当前要插入的 key 索引上的值为 DELETE，直接覆盖
+- 如果需要执行 gc 方法 & 需要扩大数组容量，则会执行 gc 方法
+- 由于 gc 方法会改变元素的位置，因此会重新计算插入的位置并插入
+
+```java
+public void put(int key, E value) {
+    int i = ContainerHelpers.binarySearch(mKeys, mSize, key);
+    if (i >= 0) {
+        //正常找到
+        mValues[i] = value;
+    } else {
+        i = ~i;
+        if (i < mSize && mValues[i] == DELETED) {
+           //标记为DELETE直接覆盖
+            mKeys[i] = key;
+            mValues[i] = value;
+            return;
+        }
+        //该位置有值，gc移除标记为DELETE元素，然后移动数组
+        if (mGarbage && mSize >= mKeys.length) {
+            gc();
+            i = ~ContainerHelpers.binarySearch(mKeys, mSize, key);
+        }
+        //扩容容量为原容量的 2 倍
+        mKeys = GrowingArrayUtils.insert(mKeys, mSize, i, key);
+        mValues = GrowingArrayUtils.insert(mValues, mSize, i, value);
+        mSize++;
+    }
+}
+```
+
+### 回收
+
+gc 将 mValue 数组中还未标记为 DELETED 的元素以及对应下标的 mKeys 数组中的元素移动到数组的前面，保证数组前面的数据都是有效数据，而不是存储着 DELETED：
+
+```java
+private void gc() {
+    int n = mSize;
+    int o = 0;
+    int[] keys = mKeys;
+    Object[] values = mValues;
+    for (int i = 0; i < n; i++) {
+        Object val = values[i];
+        if (val != DELETED) {
+            if (i != o) {
+                keys[o] = keys[i];
+                values[o] = val;
+                values[i] = null;
+            }
+            o++;
+        }
+    }
+    mGarbage = false;
+    mSize = o;
+}
+```
+
