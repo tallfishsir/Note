@@ -13,8 +13,8 @@ Activity 在其生命周期中会经历多个状态。以下是 Activity 的完�
 - onRestoreInstanceState(Bundle savedInstanceState)：当 Activity 需要从先前保存的状态中恢复时，系统会在 onStart() 之后、onResume() 之前调用此方法
 - onResume()：当 Activity 准备好与用户进行交互时调用。此时，Activity 已经完全呈现在屏幕上，用户可以与其进行交互
 - onPause()：当系统即将暂停 Activity 时调用。此时，Activity 仍然可见，但可能已经失去了焦点。例如，当用户按下 Home 键或打开另一个 Activity 时，当前 Activity 会进入 onPause 状态。通常在这个阶段，你需要保存与 UI 相关的数据
-- onSaveInstanceState(Bundle outState)：在 Activity 被意外销毁（如因屏幕旋转、内存不足等原因）之前，系统会调用此方法来保存当前 Activity 的状态。通常在 onPause() 方法之后，onStop() 方法之前调用
 - onStop()：当 Activity 完全不可见时调用。这可能是因为另一个 Activity 遮盖住了当前 Activity，或者当前 Activity 被销毁。在这个阶段，你可以释放不再需要的资源，如动画、监听器等
+- onSaveInstanceState(Bundle outState)：在 Activity 被意外销毁（如因屏幕旋转、内存不足等原因）之前，系统会调用此方法来保存当前 Activity 的状态。通常在 onStop() 方法之后调用
 - onDestroy()：当 Activity 被销毁时调用。这可能是因为系统需要回收资源，或者调用了 finish() 方法。在这个阶段，你需要释放所有持有的资源，如数据库连接、网络连接等。
 
 ### 启动模式
@@ -138,7 +138,7 @@ android:exported="true">
 
 ## Intent
 
-Intent 在 Android 中用于在组件之间传递消息，通常用于启动活动（Activity）、服务（Service）或发送广播（Broadcast）。Intent 可以携带额外的数据，用于传递信息或参数。
+Intent 在 Android 中用于在组件之间传递消息，通常用于启动活动（Activity）、服务（Service）或发送广播（Broadcast）。Intent 可以携带额外的数据，用于传递信息或参数，Intent 在传递数据时限制数据内容在 1MB 之内。
 
 以下是一些常用的 Intent 方法：
 
@@ -301,3 +301,86 @@ commit 和 apply 的区别：
 
 - apply() 的修改是异步提交的，数据在后台写入文件。但没有返回值，无法获取提交结果
 - commit() 的修改是同步提交的，返回值 Boolean 表示修改是否提交成功
+
+## 定时任务
+
+### Handler+postDelayed
+
+通过在 Handler 中调用 postDelayed() 方法，可以在指定时间后执行一个 Runnable 对象。这种方法适用于简单的定时任务，尤其是 UI 线程中的任务。
+
+```java
+final Handler handler = new Handler();
+handler.postDelayed(new Runnable() {
+    @Override
+    public void run() {
+        // 在此处执行定时任务
+        handler.postDelayed(this, 1000); // 每隔 1000 毫秒执行一次
+    }
+}, 1000);
+
+```
+
+### Timer 
+
+通过 Timer 类和 TimerTask 类，可以实现定时任务，这种方法适用于非 UI 线程的任务。可以控制TimerTask的启动和取消，第一次执行任务时可以指定delay的时间。
+
+Android 需要根据页面的生命周期和显隐来控制 Timer 的启动和取消，如果Timer调度的某个TimerTask抛出异常，Timer会停止所有任务的运行。
+
+```java
+Timer timer = new Timer();
+timer.schedule(new TimerTask() {
+    @Override
+    public void run() {
+        // 在此处执行定时任务
+    }
+}, 1000, 1000); // 延迟 1000 毫秒后执行，每隔 1000 毫秒执行一次
+```
+
+### ScheduledExecutorService
+
+基于线程池的定时任务执行器，可以支持多个任务并发执行。
+
+```java
+ScheduledExecutorService executorService = Executors.newScheduledThreadPool(1);
+executorService.scheduleAtFixedRate(new Runnable() {
+    @Override
+    public void run() {
+        // 在此处执行定时任务
+    }
+}, 1000, 1000, TimeUnit.MILLISECONDS); // 延迟 1000 毫秒后执行，每隔 1000 毫秒执行一次
+```
+
+### AlarmManager
+
+AlarmManager 类可以实现跨进程、系统级的定时任务，适用于长时间、不受应用生命周期影响的定时任务。
+
+```java
+AlarmManager alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+Intent intent = new Intent(this, MyReceiver.class);
+PendingIntent pendingIntent = PendingIntent.getBroadcast(this, 0, intent, 0);
+alarmManager.setRepeating(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, 1000, pendingIntent);
+```
+
+setRepeating() 第一个参数表示闹钟类型，有以下四种类型：
+
+- ELAPSED_REALTIME：使用自系统启动以来的时间（不包括休眠时间）作为基准。当闹钟触发时，不会唤醒设备，闹钟会在设备下次唤醒时触发
+- ELAPSED_REALTIME_WAKEUP：使用自系统启动以来的时间（不包括休眠时间）作为基准。当闹钟触发时，它会唤醒设备执行相关任务
+- RTC：使用设备的实时时钟作为基准，基于绝对时间。可以通过修改系统时间触发。当闹钟触发时，不会唤醒设备，闹钟会在设备下次唤醒时触发
+- RTC_WAKEUP：使用设备的实时时钟作为基准，基于绝对时间。可以通过修改系统时间触发。当闹钟触发时，它会唤醒设备执行相关任务
+
+AlarmManager 在系统休眠后仍然会启动。但是，从 Android 6.0（API 级别 23）开始，系统引入了 Doze 模式和应用待机模式，以优化设备的电池使用。当设备进入 Doze 模式时，系统会限制应用的网络访问和 CPU 使用，从而影响到 AlarmManager 的行为。在 Doze 模式下，有两种类型的 AlarmManager 闹钟：
+
+- 在 Doze 模式下，普通闹钟（使用 set()、setRepeating() 等方法设置的闹钟）将被推迟，直到下一个维护窗口（系统允许应用访问网络和 CPU 的时间段）才会触发。
+- 使用 setExact() 和 setExactAndAllowWhileIdle() 设置的闹钟会在指定时间准确触发。setExactAndAllowWhileIdle() 设置的闹钟在触发后，系统会立即返回到低功耗状态，因此需要确保闹钟任务的执行时间尽量短。
+
+## APK 编译流程
+
+Android APK 编译流程包括以下几个主要步骤：
+
+- 使用 AAPT 打包资源文件，生成 R.java 文件
+- 处理 AIDL 文件生成 Java 代码
+- 编译 Java 代码生成 class 文件
+- 使用 dx 或者 d8 工具将 class文件转为 dex 文件
+- 将 dex 文件，资源文件，Manifest 文件打包到一个 APK 文件中
+- 对 APK 文件进行对齐优化，确保 APK 文件中的资源以最佳方式对齐，从而提高应用运行时的性能
+- 为 APK 文件添加数字签名，确保应用的完整性和来源

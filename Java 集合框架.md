@@ -659,7 +659,7 @@ static class LinkedHashMapEntry<K,V> extends HashMap.Node<K,V> {
 }
 ```
 
-LinkedHashMap 支持两种顺序：插入顺序和访问顺序。
+LinkedHashMap 支持两种顺序：插入顺序和访问顺序，通过字段 accessOrder 设置，默认是 false 插入顺序。
 
 - 插入顺序是指按照元素被添加到哈希表中的顺序进行排序
 - 访问顺序是指按照元素被访问的顺序进行排序。当以访问顺序构建 LinkedHashMap 时，每次访问一个元素，这个元素都会被移到链表的末尾
