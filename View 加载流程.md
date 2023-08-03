@@ -251,7 +251,7 @@ View(Context context, AttributeSet attrs) {
 	}
 //attrName = layout_width , attrVal = 100
 //attrName = layout_height , attrVal = @2131165235
-//attrName = text , attrVal = helloworld
+//attrName = text , attrVal = 520
 //attrName = testAttr , attrVal = @2131361809
     
 	TypedArray ta = context.obtainStyledAttributes(attrs, R.styleable.test);

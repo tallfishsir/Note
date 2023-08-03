@@ -25,7 +25,7 @@ GlobalScope 是一个全局协程作用域，具有全局生命周期，可以�
 
 需要注意避免在具有有限生命周期的组件 (Activity等) 中使用 GlobalScope，会导致发生内存泄漏。
 
-```
+```kotlin
 public object GlobalScope : CoroutineScope {
     override val coroutineContext: CoroutineContext
         get() = EmptyCoroutineContext

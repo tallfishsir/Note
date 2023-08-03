@@ -1138,17 +1138,20 @@ Demo::class.java //javaClass
 
 KClass 的特别属性或函数：
 
-| 属性或函数名称                   | 含义                   |
-| -------------------------------- | ---------------------- |
-| isCompanion                      | 是否是伴生对象         |
-| isData                           | 是否是数据类           |
-| isSealed                         | 是否是密封类           |
-| objectInstance                   | object 实例            |
-| companionObjectInstance          | 伴生对象实例           |
-| declareMemberExtensionFunctions  | 扩展函数               |
-| declareMemberExtensionProperties | 扩展属性               |
-| memberExtensionFunctions         | 本类或者超类的扩展函数 |
-| memberExtensionProperties        | 本类或者超类的扩展属性 |
+| 属性或函数名称                   | 含义                                         |
+| -------------------------------- | -------------------------------------------- |
+| isCompanion                      | 是否是伴生对象                               |
+| isData                           | 是否是数据类                                 |
+| isSealed                         | 是否是密封类                                 |
+| objectInstance                   | object 实例                                  |
+| companionObjectInstance          | 伴生对象实例                                 |
+| declareMemberExtensionFunctions  | 扩展函数                                     |
+| declareMemberExtensionProperties | 扩展属性                                     |
+| memberExtensionFunctions         | 本类或者超类的扩展函数                       |
+| memberExtensionProperties        | 本类或者超类的扩展属性                       |
+| qualifiedName                    | 类的完全限定名称，包含包名                   |
+| simpleName                       | 类的简单名称                                 |
+| javaName                         | 类的 Java 风格完全限定名称，嵌套类使用$分割· |
 
 #### KCallable
 
@@ -1160,11 +1163,41 @@ KCallable.parameters 可以获取一个 List\<KParameter>，他代表的是函�
 
 #### KFunction
 
-KFunctionN 代表了不同数量参数的函数，每一个类型都继承了 KFunction 并加上一个额外的成员 invoke
+Kotlin 中可以通过 KClass 的属性，获取不同类型的 KFunction
+
+- primaryConstructor：主构造函数
+- constructor：从构造函数
+- functions：类中所有声明的可访问的函数集合，包括继承的函数
+- memberFunctions：类中所有声明的成员函数集合，包括继承的函数
+- declaredMemberFunctions：类中所有声明的成员函数集合，不包括继承的函数
+- staticFunctions：类中所有声明的静态函数
+
+当出现重载函数时，可以通过以下策略选择
+
+- 参数数量：find{ it.parameters.isEmpty() }
+- 参数类型：find{ it.parameters[0].type = String::class.createType() }
+- 参数名：find{ it.name == "xxx" }
+
+当比较参数类型的时候，有两种比较方式
+
+`it.parameters[0].type == String::class.createType()` 这种方式会比较类型的完整信息，包括泛型参数。例如，如果 `it.parameters[0].type` 是 `List<String>`，那么它就不会等于 `List::class.createType()`，因为后者的泛型参数是未知的。
+
+而 `it.parameters[0].type.jvmErasure == String::class` 这种方式只会比较类型擦除后的结果，所以它会认为 `List<String>` 和 `List` 是相等的。
+
+因此，如果你在比较类型时需要考虑泛型参数，那么应该使用 `== String::class.createType()` 这种方式。如果你不关心泛型参数，只需要知道类型是否是某个类或其子类，那么可以使用 `.jvmErasure == String::class` 这种方式。
 
 #### KProperty
 
+Kotlin 中可以通过 KClass 的属性，获取不同类型的 KProperty
+
+- memberProperties：类中的所有属性，包括继承的属性
+- declaredMemberProperties：类中的所有属性，不包括继承的属性
+
 一个成员属性由 KProperty1 的实例来表示，KProperty1 是一个泛型类 KProperty1\<T1, T2>，第一个参数表示接收者的类型，第二个参数代表了属性的类型。这样就可以对正确类型的接收者调用它的 get 方法：KProperty1.get(T1)
+
+如何需要调用可变属性的 setter 方法，需要将 KProperty 对象转换为 KMutableProperty。
+
+#### kType
 
 ### Kotlin 注解
 

@@ -8,7 +8,7 @@ Handler 是 Android 中的消息处理机制，在不同的线程通过 Handler 
 
 #### Looper
 
-Looper 的构造函数是由 private 修饰，所以在 ActivityThread.main() 中，是通过 prepareMainLooper() 创建了 主线程的 Looper 对象，实际上其内部还是通过 prepare() 创建 Looper 对象。整理流程是：
+Looper 的构造函数是由 private 修饰，所以在 ActivityThread.main() 中，是通过 prepareMainLooper() 创建了主线程的 Looper 对象，实际上其内部还是通过 prepare() 创建 Looper 对象。整理流程是：
 
 - prepare() 内部通过构造函数创建 Looper(quitAllowe) 对象
 - Looper 构造函数中创建 MessageQueue 对象(mQueue)并获取当前所在线程(mThread)
